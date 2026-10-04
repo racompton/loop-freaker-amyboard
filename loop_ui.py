@@ -97,7 +97,8 @@ class Menu:
                 rows += ['DRUM PARTS']
             return rows
         if self.page == 'settings':
-            return ['MIDI CHANNELS', 'CV SOURCE', 'TEMPO', 'SCREENSAVER', 'PLAY / STOP']
+            return ['MIDI CHANNELS', 'CV SOURCE', 'TEMPO', 'MIX',
+                    'SCREENSAVER', 'PLAY / STOP']
         if self.page == 'channels':
             return [NAMES[r] for r in ROLES]
         if self.page == 'drum_roll':
@@ -149,9 +150,17 @@ class Menu:
         self.notice, self.notice_at = text, now
         self.dirty = True
 
+    def clamp_index(self):
+        rows = self.rows()
+        self.index = max(0, min(self.index, len(rows) - 1)) if rows else 0
+        return rows
+
     def selected_value(self):
         e = self.engine
-        row = self.rows()[self.index]
+        rows = self.clamp_index()
+        if not rows:
+            return None
+        row = rows[self.index]
         if self.page in ROLES:
             if row.startswith('PRESET B'):
                 track = e.tracks[self.page]
@@ -176,7 +185,7 @@ class Menu:
         if self.page == 'channels':
             return str(e.tracks[ROLES[self.index]].channel)
         if self.page == 'drum_roll' and row == 'AUTO EVERY':
-            return '%d BEATS' % e.drum_roll_beats
+            return '%d BEATS' % e.drum_roll_beats if e.drum_roll_beats else 'OFF'
         if self.page == 'load' and row in self.saved_names:
             return 'KEY MATCH' if self._compatible_saved(row) else 'OTHER KEY'
         if self.page.startswith('preset:'):
@@ -192,6 +201,8 @@ class Menu:
                 return NAMES.get(e.cv_role, 'OFF')
             if row == 'TEMPO':
                 return '%d BPM' % e.bpm
+            if row == 'MIX':
+                return 'ON' if e.mix_enabled else 'OFF'
             if row == 'SCREENSAVER':
                 return 'ON' if self.screensaver_enabled else 'OFF'
             if row == 'PLAY / STOP':
@@ -200,7 +211,10 @@ class Menu:
 
     def adjust(self, delta, now):
         e = self.engine
-        row = self.rows()[self.index]
+        rows = self.clamp_index()
+        if not rows:
+            return
+        row = rows[self.index]
         if self.page in ROLES and row == 'LOOP LENGTH':
             e.set_loop_length(self.page, delta)
         elif self.page in ROLES and row == 'DIRECTION':
@@ -227,6 +241,8 @@ class Menu:
             e.set_cv_role(sources[(sources.index(e.cv_role) + delta) % len(sources)])
         elif self.page == 'settings' and row == 'TEMPO':
             e.set_bpm(e.bpm + delta)
+        elif self.page == 'settings' and row == 'MIX':
+            e.mix_enabled = delta > 0
         elif self.page == 'settings' and row == 'SCREENSAVER':
             self.screensaver_enabled = delta > 0
             if not self.screensaver_enabled:
@@ -236,7 +252,10 @@ class Menu:
 
     def click(self, now):
         e = self.engine
-        row = self.rows()[self.index]
+        rows = self.clamp_index()
+        if not rows:
+            return
+        row = rows[self.index]
         if self.editing:
             if self.page == 'drum' and row == 'GENRE' and self.genre_candidate:
                 e.set_drum_genre(self.genre_candidate)
@@ -411,6 +430,7 @@ class Menu:
 
     def render(self, d):
         d.fill(0)
+        self.clamp_index()
         title = NAMES.get(self.page, self.page.upper())
         if self.page == 'main':
             title = '~L00P FR34K3R~'

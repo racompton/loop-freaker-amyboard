@@ -394,6 +394,7 @@ class SequencerTests(unittest.TestCase):
                             for cell in self.e.tracks['drum'].pattern[16:]))
 
     def test_queued_load_waits_for_common_boundary_and_restores_phase(self):
+        self.e.mix_enabled = False
         self.e.tracks['lead'].pattern = [60] * 16
         self.e.tracks['bass'].pattern = [36] * 32
         self.e.tracks['chords'].pattern = [None] * 64
@@ -418,6 +419,74 @@ class SequencerTests(unittest.TestCase):
         # A subsequent load uses the newly started set's own loop origin.
         self.e.step = 65
         self.assertEqual(128, self.e.queue_load('FUCKING DUCK', saved))
+
+    def test_mix_hands_off_tracks_on_beats_then_at_roll(self):
+        notices = []
+        self.e.on_mix = notices.append
+        for role, cell in (('bass', 36), ('lead', 60),
+                           ('chords', [60, 64, 67, 71]),
+                           ('drum', [(36, 110)])):
+            self.e.tracks[role].pattern = [cell] * 16
+        saved = self.e.snapshot()
+        saved['tracks']['bass']['pattern'] = [40] * 16
+        saved['tracks']['lead']['pattern'] = [72] * 16
+        saved['tracks']['chords']['pattern'] = [[72, 76, 79, 83]] * 16
+        saved['tracks']['drum']['pattern'] = [[[38, 110]]] * 16
+        saved['tracks']['bass']['channel'] = 4
+        saved['tracks']['lead']['channel'] = 3
+        self.e.step = 5
+        self.assertEqual(8, self.e.queue_load('FUCKING DUCK', saved))
+        self.e.step = 7
+        self.e.advance()
+        self.assertEqual(36, self.e.tracks['bass'].pattern[0])
+        self.e.step = 8
+        self.e.advance()
+        self.assertEqual(40, self.e.tracks['bass'].pattern[0])
+        self.assertEqual(3, self.e.tracks['bass'].channel)
+        self.assertEqual(60, self.e.tracks['lead'].pattern[0])
+        self.assertEqual(['MIXING IN BASS'], notices)
+        self.e.step = 135
+        self.e.advance()
+        self.assertEqual(60, self.e.tracks['lead'].pattern[0])
+        self.e.step = 136
+        self.e.advance()
+        self.assertEqual(72, self.e.tracks['lead'].pattern[0])
+        self.assertEqual(4, self.e.tracks['lead'].channel)
+        self.e.step = 264
+        self.e.advance()
+        self.assertEqual([72, 76, 79, 83], self.e.tracks['chords'].pattern[0])
+        self.assertEqual([(36, 110)], self.e.tracks['drum'].pattern[0])
+        self.e.roll_due_step = 300
+        for step in range(265, 317):
+            self.e.step = step
+            self.e.advance()
+        self.assertEqual([(38, 110)], self.e.tracks['drum'].pattern[0])
+        self.assertEqual(4, self.e.tracks['bass'].channel)
+        self.assertEqual(3, self.e.tracks['lead'].channel)
+        self.assertEqual(['MIXING IN BASS', 'MIXING IN SYNTH',
+                          'MIXING IN CHORD', 'MIXING IN DRUMS',
+                          'MIX COMPLETE!'], notices)
+        self.assertIsNone(self.e.mix_state)
+
+    def test_mix_uses_kick_break_when_auto_roll_is_off(self):
+        self.e.set_drum_roll_beats(0)
+        self.assertIsNone(self.e.roll_due_step)
+        saved = self.e.snapshot()
+        saved['tracks']['drum']['pattern'] = [[[38, 100]]] * 16
+        self.e.step = 1
+        self.assertEqual(4, self.e.queue_load('FUCKING DUCK', saved))
+        for step in (4, 132, 260):
+            self.e.step = step
+            self.e.advance()
+        self.assertEqual('drum', self.e.mix_state['stage'])
+        self.e.break_due_step = 300
+        self.e.step = 299
+        self.e.advance()
+        self.assertNotEqual([(38, 100)], self.e.tracks['drum'].pattern[0])
+        self.e.step = 300
+        self.e.advance()
+        self.assertEqual([(38, 100)], self.e.tracks['drum'].pattern[0])
+        self.assertIsNone(self.e.roll_due_step)
 
     def test_snapshot_is_independent_of_live_mutations(self):
         self.e.tracks['drum'].pattern = [[(36, 110)]] * 16
@@ -547,6 +616,21 @@ class MenuTests(unittest.TestCase):
         self.m.index = 0
         self.m.click(5)
         self.assertEqual(16, self.e.roll_remaining)
+
+    def test_mix_defaults_on_and_auto_roll_can_be_disabled(self):
+        self.m.enter('settings')
+        self.m.index = self.m.rows().index('MIX')
+        self.assertEqual('ON', self.m.selected_value())
+        self.m.click(1)
+        self.m.adjust(-1, 2)
+        self.assertEqual('OFF', self.m.selected_value())
+        self.m.enter('drum_roll')
+        self.m.index = self.m.rows().index('AUTO EVERY')
+        self.m.click(3)
+        self.m.adjust(-4, 4)
+        self.assertEqual('OFF', self.m.selected_value())
+        self.m.adjust(1, 5)
+        self.assertEqual('32 BEATS', self.m.selected_value())
 
     def test_genre_turn_only_previews_until_button_confirms(self):
         self.m.enter('drum')
@@ -718,7 +802,7 @@ class MenuTests(unittest.TestCase):
 
     def test_settings_has_no_internal_sound_editor(self):
         self.m.enter('settings')
-        self.assertEqual(['MIDI CHANNELS', 'CV SOURCE', 'TEMPO',
+        self.assertEqual(['MIDI CHANNELS', 'CV SOURCE', 'TEMPO', 'MIX',
                           'SCREENSAVER', 'PLAY / STOP'], self.m.rows())
 
     def test_tick_wrap_for_idle(self):
@@ -795,7 +879,7 @@ class SavedSetTests(unittest.TestCase):
                             name.split(' ')[0] == 'D' and
                             name.split(' ')[1] in ADJECTIVES and name.split(' ')[2] in NOUNS
                             for name in names))
-        self.assertEqual(sorted(names), self.store.list_names())
+        self.assertEqual(names, self.store.list_names())
         self.assertEqual(before, self.store.load(names[0]))
         self.assertFalse(any(name.endswith('.tmp') for name in os.listdir(self.temp.name)))
 
@@ -858,6 +942,19 @@ class SavedSetTests(unittest.TestCase):
         self.store.delete(first)
         self.assertEqual([second], self.store.list_names())
         self.assertNotEqual(second, self.store.save(self.engine.snapshot()))
+
+    def test_sets_group_by_genre_then_save_order_after_reboot(self):
+        names = []
+        for genre in ('TECHNO', 'HOUSE', 'TECHNO', 'BREAKS', 'HOUSE'):
+            snapshot = self.engine.snapshot()
+            snapshot['drum_genre'] = genre
+            names.append(self.store.save(snapshot))
+        expected = [names[1], names[4], names[0], names[2], names[3]]
+        self.assertEqual(expected, self.store.list_names())
+        reopened = Sets(self.temp.name)
+        self.assertEqual(expected, reopened.list_names())
+        reopened.delete(names[1])
+        self.assertEqual(expected[1:], Sets(self.temp.name).list_names())
 
 
 class PresetPreferenceTests(unittest.TestCase):

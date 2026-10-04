@@ -55,7 +55,7 @@ def validate_set_steps(data):
     if 'chord_size' in data and not _integer(data['chord_size'], 1, 5):
         raise ValueError('invalid chord size')
     roll_beats = data.get('drum_roll_beats', 128)
-    if not _integer(roll_beats, 32, 1024) or roll_beats % 32:
+    if not _integer(roll_beats, 0, 1024) or roll_beats % 32:
         raise ValueError('invalid drum roll interval')
     if 'break_duration_beats' in data and not _integer(data['break_duration_beats'], 2, 16):
         raise ValueError('invalid kick break duration')
@@ -139,6 +139,7 @@ def validate_set(data):
 class Sets:
     def __init__(self, directory=SET_DIR):
         self.directory = directory
+        self.order_path = directory + '/.save_order.json'
         self.keys = {}
         self.cached = {}
         try:
@@ -147,6 +148,7 @@ class Sets:
             if not self._exists(directory):
                 raise
         self.names = self._scan_names()
+        self.save_order = self._read_order()
         # Build a bounded live-set cache before playback starts. Read just the
         # key for larger libraries so boot time and memory remain bounded.
         for name in self.names:
@@ -161,6 +163,87 @@ class Sets:
                         self.keys[name] = key
             except (OSError, ValueError, TypeError):
                 pass
+        self._sort_names()
+
+    def _read_order(self):
+        try:
+            with open(self.order_path, 'r') as handle:
+                stored = json.loads(handle.read())
+        except (OSError, ValueError, TypeError):
+            stored = []
+        if not isinstance(stored, list):
+            stored = []
+        order = []
+        for name in stored:
+            if isinstance(name, str) and name in self.names and name not in order:
+                order.append(name)
+        missing = [name for name in self.names if name not in order]
+        directory_order = {name: index for index, name in enumerate(self.names)}
+        def age(name):
+            try:
+                value = os.stat(self._path(name))[8]
+                return value if isinstance(value, (int, float)) else 0
+            except (OSError, IndexError):
+                return 0
+        missing.sort(key=lambda name: (age(name), directory_order[name]))
+        return order + missing
+
+    def _sort_names(self):
+        order = {name: index for index, name in enumerate(self.save_order)}
+        genres = {genre: index for index, genre in enumerate(patterns.DRUM_GENRES)}
+        def group(name):
+            letter = name.split(' ', 1)[0]
+            genre = PREFIX_GENRE.get(letter)
+            if genre is None:
+                genre = self.cached.get(name, {}).get('drum_genre')
+            if genre is None:
+                genre = self._peek_genre(name)
+            return genres.get(genre, len(genres))
+        self.names.sort(key=lambda name: (group(name), order.get(name, len(order))))
+
+    def _peek_genre(self, name):
+        try:
+            with open(self._path(name), 'r') as handle:
+                header = handle.read(256)
+            marker = '"drum_genre"'
+            colon = header.find(':', header.find(marker) + len(marker))
+            if marker not in header or colon < 0:
+                return None
+            start = header.find('"', colon + 1)
+            end = header.find('"', start + 1)
+            genre = header[start + 1:end]
+            return genre if genre in patterns.DRUM_GENRES else None
+        except OSError:
+            return None
+
+    def _write_order_steps(self):
+        payload = json.dumps(self.save_order)
+        temporary = self.order_path + '.tmp'
+        try:
+            with open(temporary, 'w') as handle:
+                for start in range(0, len(payload), 256):
+                    handle.write(payload[start:start + 256])
+                    yield
+            try:
+                os.rename(temporary, self.order_path)
+            except OSError:
+                # Some MicroPython VFS implementations cannot rename over an
+                # existing file. The set files remain the recovery source.
+                try:
+                    os.remove(self.order_path)
+                except OSError:
+                    pass
+                os.rename(temporary, self.order_path)
+        except Exception:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
+            raise
+
+    def _write_order(self):
+        for _ in self._write_order_steps():
+            pass
 
     def _peek_key(self, name):
         with open(self._path(name), 'r') as handle:
@@ -195,7 +278,6 @@ class Sets:
                 name = filename[:-5].replace('_', ' ')
                 if valid_name(name):
                     names.append(name)
-        names.sort()
         return names
 
     def list_names(self):
@@ -231,7 +313,9 @@ class Sets:
             raise
         self.keys[name] = snapshot['scale_name']
         self.names.append(name)
-        self.names.sort()
+        self.save_order.append(name)
+        self._sort_names()
+        self._write_order()
         if len(self.cached) < MAX_CACHED_SETS:
             self.cached[name] = snapshot
         return name
@@ -290,15 +374,20 @@ class Sets:
             raise
         self.keys[name] = snapshot['scale_name']
         self.names.append(name)
-        self.names.sort()
+        self.save_order.append(name)
+        self._sort_names()
         if len(self.cached) < MAX_CACHED_SETS:
             self.cached[name] = snapshot
+        for _ in self._write_order_steps():
+            yield
         result['value'] = name
 
     def delete_steps(self, name, result):
-        self.delete(name)
-        result['value'] = name
+        self._delete_set(name)
         yield
+        for _ in self._write_order_steps():
+            yield
+        result['value'] = name
 
     def restore_steps(self, name, snapshot, result):
         """Undo DELETE by recreating the same named set atomically."""
@@ -323,18 +412,27 @@ class Sets:
                 pass
             raise
         self.names.append(name)
-        self.names.sort()
+        self.save_order.append(name)
+        self._sort_names()
         self.keys[name] = snapshot['scale_name']
         if len(self.cached) < MAX_CACHED_SETS:
             self.cached[name] = snapshot
+        for _ in self._write_order_steps():
+            yield
         result['value'] = name
 
     def key_for(self, name):
         return self.keys.get(name)
 
     def delete(self, name):
+        self._delete_set(name)
+        self._write_order()
+
+    def _delete_set(self, name):
         os.remove(self._path(name))
         if name in self.names:
             self.names.remove(name)
+        if name in self.save_order:
+            self.save_order.remove(name)
         self.keys.pop(name, None)
         self.cached.pop(name, None)

@@ -34,6 +34,7 @@ class App:
         self.last_clock_us = None
         self.micros = time.ticks_us if hasattr(time, 'ticks_us') else lambda: time.ticks_ms() * 1000
         self.engine.on_load = lambda name: self.menu.show_notice('LOADED ' + name, time.ticks_ms())
+        self.engine.on_mix = lambda message: self.menu.show_notice(message, time.ticks_ms())
         self.galaxy = NoteGalaxy()
         self.engine.on_note = lambda role, note, velocity: (
             self.galaxy.note(role, note, velocity) if self.menu.screensaver_enabled else None)
@@ -175,6 +176,7 @@ class App:
                         self.engine.pending_load = None
                     self.menu.saved_names = self.set_store.list_names()
                     self.menu.saved_keys.pop(job['name'], None)
+                    self.menu.clamp_index()
                     self.menu.show_notice('DELETED ' + job['name'], now)
             except Exception as exc:
                 print('Loop storage failed:', exc)

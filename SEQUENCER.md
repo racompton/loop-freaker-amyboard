@@ -105,7 +105,7 @@ DRUMS
   GENRE          HOUSE / TECHNO / BREAKS / ELECTRO / DRUM'N'BASS
   DRUM ROLL
     TRIGGER NOW
-    AUTO EVERY    32–1024 beats in steps of 32; default 128
+    AUTO EVERY    OFF or 32–1024 beats in steps of 32; default 128
   MUTE / UNMUTE
   DRUM PARTS
     KICK / SNARE / TOMS / RIMSHOT / CLAP / HATS / CYMBALS
@@ -122,6 +122,7 @@ SETTINGS
     SYNTH / BASS / CHORD / DRUMS
   CV SOURCE       OFF / SYNTH / BASS / CHORD / DRUMS
   TEMPO
+  MIX             ON / OFF (default ON)
   SCREENSAVER    OFF / ON
   PLAY / STOP
 ```
@@ -174,10 +175,26 @@ complete current set to
 genre letter (H, T, B, E, or D), for example `H FUCKING DUCK`. Earlier sets
 without a prefix remain loadable. A set includes all
 four patterns, external presets, mutes, channels, CV routing, tempo, and genre.
-Unsaved edits still reset on boot. LOAD lists the
-saved names; clicking one queues it for the next point when all current loops
-complete together, then starts the saved loops together. If playback is stopped,
-it loads immediately. LOAD → DELETE... lists names, then requires a separate
+Unsaved edits still reset on boot. LOAD groups names by genre in menu order
+(HOUSE, TECHNO, BREAKS, ELECTRO, DRUM'N'BASS); within each group, older saves
+appear first and new saves at the bottom. `/user/sets/.save_order.json` keeps
+that order across restarts. Sets from before this index existed use filesystem
+timestamps when available, then directory order as a fallback.
+
+With SETTINGS → MIX ON (the default), selecting a set cues its BASS for the
+next beat. The loaded SYNTH takes over 32 beats later, CHORD another 32 beats
+later, and DRUMS at the next automatic drum roll. The new drum pattern becomes
+audible after that roll; setting DRUM ROLL → AUTO EVERY to OFF instead makes the
+next 64-beat kick break the drum handoff. The OLED shows `MIXING IN BASS`,
+`MIXING IN SYNTH`, `MIXING IN CHORD`, `MIXING IN DRUMS`, then `MIX COMPLETE!`.
+Old and new tracks retain independent loop phases during the mix. MIDI channels
+from the saved set are applied together at the final handoff so the interim
+tracks cannot collide on a channel. Loaded key, tempo, genre, CV routing, and
+drum settings also become active at that final handoff.
+
+With MIX OFF, LOAD waits until all current loops complete together, then starts
+the saved loops together. When playback is stopped, LOAD always applies
+immediately. LOAD → DELETE... lists names, then requires a separate
 DELETE SET choice; deleting a queued set also cancels that pending load.
 Set storage runs in short background steps between MIDI clocks, so the menu
 may briefly show SAVING or LOADING while playback continues.
@@ -220,7 +237,8 @@ duration, removes the kick and adds random other drum hits, then resumes the
 saved loop. The duration is retained in saved sets. AUTO EVERY
 triggers a one-bar snare/tom roll with claps on roughly one quarter of its hits
 when claps are unmuted, after the selected beat interval (128 by
-default); TRIGGER NOW starts it at the next step. The roll and kick break alter
+default); OFF disables automatic rolls and TRIGGER NOW still plays a manual
+one. The roll and kick break alter
 playback only, so the original drum pattern returns afterward. Muted drum
 parts remain muted during these events. A coincident roll takes priority over
 the 64-beat break.

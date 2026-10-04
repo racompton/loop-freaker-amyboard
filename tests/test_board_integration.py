@@ -250,6 +250,25 @@ class BoardTests(unittest.TestCase):
         self.assertTrue(self.app.running)
         self.assertIsNone(self.app.last_error)
 
+    def test_deleting_last_set_keeps_load_cursor_valid_and_playback_running(self):
+        name = self.app.set_store.save(self.app.engine.snapshot())
+        menu = self.app.menu
+        menu.enter('load')
+        menu.index = menu.rows().index('DELETE...')
+        menu.click(1)
+        menu.index = menu.rows().index(name)
+        menu.click(2)
+        menu.index = menu.rows().index('DELETE SET')
+        menu.click(3)
+        self.assertTrue(menu.busy)
+        self.finish_job()
+        self.assertEqual('load', menu.page)
+        self.assertEqual(['(NO SAVES)'], menu.rows())
+        self.assertEqual(0, menu.index)
+        self.app._ui(None)
+        self.assertTrue(self.app.running)
+        self.assertIsNone(self.app.last_error)
+
     def test_click_applies_immediately_without_undo_snapshot(self):
         self.app.menu.enter('lead')
         self.app.menu.index = self.app.menu.rows().index('RANDOM NOTES')

@@ -4,13 +4,15 @@ A four-track generative MIDI looper for [AMYboard](https://github.com/shorepine/
 
 ![OLED menu preview](assets/looper-preview.png)
 
-**Current version:** [v0.1.1](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
+**Current version:** [v0.2.0](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
 
 ## What it does
 
 - Starts with a fresh randomized set on every boot. The main **RANDOMIZE** action changes to a Camelot-compatible key and generates new notes, presets, and mutes; each instrument also has its own RANDOMIZE action.
 - Lets you change loop length from 1–64 sixteenth-note steps, note count, octave, playback direction, chord size, MIDI channel, preset, and mute state from the encoder. Shortening and re-expanding a loop restores the same hidden notes.
-- Saves sets under unique two-word names, loads them at a shared loop boundary, and highlights sets compatible with the current key. Preset preferences are specific to the instrument and MIDI channel.
+- Saves sets under unique two-word names and highlights sets compatible with the current key. Preset preferences are specific to the instrument and MIDI channel.
+- With **SETTINGS → MIX** on by default, LOAD brings in BASS on the next beat, SYNTH 32 beats later, CHORD another 32 beats later, and DRUMS at the next automatic roll. If automatic rolls are off, DRUMS enter at the next kick break. The OLED announces each handoff and `MIX COMPLETE!`. Turn MIX off for the original all-at-once load.
+- Groups saved sets by genre, with the oldest first and newest last within each group. A persistent order index keeps that arrangement after reboot. Deleting a set no longer leaves the LOAD cursor past the end of the list.
 - Generates HOUSE, TECHNO, BREAKS, ELECTRO, and DRUM'N'BASS patterns, with genre tempo transitions over 64 beats. Drums can add ghost notes, fills, and a recurring kick breakdown.
 - Sends external MIDI notes and 24-PPQ clock. CV defaults to 1 V/octave with C4 at 0 V and a 5 V gate. Internal AMY sound playback is disabled.
 - Offers an optional note visualizer screensaver, off by default. OLED updates are coalesced to reduce competition with MIDI timing.
