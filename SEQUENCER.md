@@ -130,7 +130,8 @@ SETTINGS
 
 Main RANDOMIZE matches Enter: it chooses a new scale, regenerates all four
 patterns, randomizes all four presets, randomizes SYNTH/BASS/CHORD mutes and
-each drum-part mute, and leaves the whole DRUMS mute unchanged. As in the
+each drum-part mute, and leaves the whole DRUMS mute unchanged outside AUTO
+PLAY. As in the
 original, random mutes can produce a quiet pattern; unmute tracks/parts as desired.
 It also shows a 640 ms static BAM! starburst. The OLED refreshes once for the
 picture and once to restore the menu.
@@ -203,14 +204,22 @@ may briefly show SAVING or LOADING while playback continues.
 AUTO PLAY is off by default. When enabled, it prepares four fresh randomized
 instrument loops and presets in small slices between MIDI clock pulses. The
 incoming key is chosen from the current key's Camelot-compatible neighbors.
-After 128 beats, the four instruments enter in a random order. Each incoming
-track gets a randomized mute state; handoffs are 32 beats apart, except DRUMS
-waits for the next drum roll (or the next kick break when rolls are off).
+The drum roll runs every 128 beats in this mode. For the 32 beats before each
+roll, snare, clap, and two other randomly selected drum parts are temporarily
+silenced; the stored pattern and part mutes remain intact. A new transition
+begins 64 beats after a roll, with at least 128 beats between a completed
+transition and the next one. The four instruments switch in random order,
+32 beats apart; DRUMS switches at its turn. DRUMS stays unmuted, and at least
+two of SYNTH, BASS, and CHORD remain unmuted throughout. Incoming melodic mute
+states are otherwise randomized. The previous drum-roll interval is restored
+when AUTO PLAY is turned off.
 The main screen shows the current key and incoming key separated by `>` during
 the transition, then returns to the new current key when all four tracks have
-switched. Another transition begins 128 beats after the final handoff. Turning
-AUTO PLAY off lets an active transition finish; manual LOAD takes priority and
-resets the AUTO PLAY wait.
+switched. The bottom status line shows beats until the next instrument switch
+and the instrument name while AUTO PLAY is on. With AUTO PLAY off it shows
+beats until the next drum roll and `*` before each audible instrument initial,
+for example `R128 *S  B *C *D`. Turning AUTO PLAY off lets an active transition
+finish; manual LOAD takes priority and resets the AUTO PLAY wait.
 In LOAD, matching sets have bright lines above and below their names, and the
 selected row says `KEY MATCH` or `OTHER KEY`. Matching uses the playing key and
 the same Camelot neighbors/relative major-minor rule as RANDOMIZE; the marks

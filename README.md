@@ -4,7 +4,7 @@ A four-track generative MIDI looper for [AMYboard](https://github.com/shorepine/
 
 ![OLED menu preview](assets/looper-preview.png)
 
-**Current version:** [v0.3.0](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
+**Current version:** [v0.4.0](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
 
 ## What it does
 
@@ -13,7 +13,7 @@ A four-track generative MIDI looper for [AMYboard](https://github.com/shorepine/
 - CHORD shows the Korg minilogue's P1–P200 as one continuous range, sending Bank Select LSB 0/1 and Program Change 0–99 to access both hundreds.
 - Saves sets under unique two-word names and highlights sets compatible with the current key. Preset preferences are specific to the instrument and MIDI channel.
 - With **SETTINGS → MIX** on by default, LOAD brings in BASS on the next beat, SYNTH 32 beats later, CHORD another 32 beats later, and DRUMS at the next automatic roll. If automatic rolls are off, DRUMS enter at the next kick break. The OLED announces each handoff and `MIX COMPLETE!`. Turn MIX off for the original all-at-once load.
-- Optional **SETTINGS → AUTO PLAY** creates fresh Camelot-compatible loops and presets, then brings the four instruments in at 32-beat intervals in a random order. DRUMS enters at the next roll or kick break. Their mute states are randomized; the OLED shows the old and new keys during the transition. The next transition starts 128 beats after all four instruments have switched. AUTO PLAY is off by default.
+- Optional **SETTINGS → AUTO PLAY** creates fresh Camelot-compatible loops and presets, then brings the four instruments in at 32-beat intervals in a random order, beginning 64 beats after a drum roll. Rolls repeat every 128 beats; snare, clap, and two other random drum parts drop out for 32 beats before each roll. DRUMS stays unmuted and at least two melodic instruments remain audible. The OLED shows the old/new keys during transitions and a countdown to the next instrument switch. AUTO PLAY is off by default; when off, the bottom line shows the drum-roll countdown and instrument mute states.
 - Groups saved sets by genre, with the oldest first and newest last within each group. A persistent order index keeps that arrangement after reboot. Deleting a set no longer leaves the LOAD cursor past the end of the list.
 - Generates HOUSE, TECHNO, BREAKS, ELECTRO, and DRUM'N'BASS patterns, with genre tempo transitions over 64 beats. Drums can add ghost notes, fills, and a recurring kick breakdown.
 - Sends external MIDI notes and 24-PPQ clock. CV defaults to 1 V/octave with C4 at 0 V and a 5 V gate. Internal AMY sound playback is disabled.

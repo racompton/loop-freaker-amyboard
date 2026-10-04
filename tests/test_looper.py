@@ -507,8 +507,11 @@ class SequencerTests(unittest.TestCase):
                              plan['saved']['tracks'][role]['channel'])
             self.assertEqual(len(before['tracks'][role]['pattern']),
                              len(plan['saved']['tracks'][role]['pattern']))
+        self.assertFalse(plan['saved']['tracks']['drum']['muted'])
+        self.assertGreaterEqual(sum(not plan['saved']['tracks'][role]['muted']
+                                    for role in ('lead', 'bass', 'chords')), 2)
 
-    def test_auto_play_random_order_handoffs_and_128_beat_pause(self):
+    def test_auto_play_handoffs_begin_64_beats_after_roll(self):
         self.e.set_auto_play(True)
         result = {}
         for _ in self.e.prepare_auto_steps(result):
@@ -516,29 +519,81 @@ class SequencerTests(unittest.TestCase):
         plan = result['value']
         plan['order'] = ['lead', 'bass', 'chords', 'drum']
         self.e.auto_plan = plan
-        self.e.roll_due_step = 900
         notices = []
         self.e.on_auto = notices.append
         self.e.step = 512
         self.e.advance()
+        self.assertEqual(768, self.e.auto_due_step)
+        self.assertEqual(1024, self.e.roll_due_step)
+        self.assertEqual([], notices)
+        self.e.step = 768
+        self.e.advance()
         self.assertEqual(['start', 'lead'], notices)
         self.assertEqual(plan['old_key'], self.e.scale_name)
         self.assertEqual(plan['new_key'], self.e.auto_state['new_key'])
-        self.e.step = 640
-        self.e.advance()
-        self.assertEqual('bass', notices[-1])
-        self.e.step = 768
-        self.e.advance()
-        self.assertEqual('chords', notices[-1])
         self.e.step = 896
         self.e.advance()
+        self.assertEqual('bass', notices[-1])
+        self.e.step = 1024
+        self.e.advance()
         self.assertEqual('chords', notices[-1])
-        self.e.step = 900
+        self.e.step = 1152
         self.e.advance()
         self.assertEqual(['start', 'lead', 'bass', 'chords', 'drum', 'complete'], notices)
         self.assertIsNone(self.e.auto_state)
         self.assertEqual(plan['new_key'], self.e.scale_name)
-        self.assertEqual(900 + 128 * 4, self.e.auto_due_step)
+        self.assertIsNone(self.e.auto_due_step)
+        self.assertEqual(1152 + 128 * 4, self.e.auto_min_step)
+
+    def test_auto_play_keeps_drums_and_two_melodic_tracks_audible(self):
+        for role in ROLES:
+            self.e.tracks[role].muted = True
+        self.e.set_drum_roll_beats(0)
+        self.e.set_auto_play(True)
+        self.assertEqual(128, self.e.drum_roll_beats)
+        self.assertFalse(self.e.tracks['drum'].muted)
+        self.assertGreaterEqual(sum(not self.e.tracks[role].muted
+                                    for role in ('lead', 'bass', 'chords')), 2)
+        self.e.toggle_mute('drum')
+        self.assertFalse(self.e.tracks['drum'].muted)
+        for role in ('lead', 'bass', 'chords'):
+            self.e.toggle_mute(role)
+            self.assertGreaterEqual(sum(not self.e.tracks[r].muted
+                                        for r in ('lead', 'bass', 'chords')), 2)
+        self.e.set_auto_play(False)
+        self.assertEqual(0, self.e.drum_roll_beats)
+
+    def test_auto_play_load_cannot_mute_drums_or_all_melodic_tracks(self):
+        saved = self.e.snapshot()
+        for role in ROLES:
+            saved['tracks'][role]['muted'] = True
+        self.e.set_auto_play(True)
+        boundary = self.e.queue_load('QUIET SET', saved, mix=False)
+        self.e.step = boundary
+        self.e.advance()
+        self.assertFalse(self.e.tracks['drum'].muted)
+        self.assertGreaterEqual(sum(not self.e.tracks[role].muted
+                                    for role in ('lead', 'bass', 'chords')), 2)
+        self.assertEqual(128, self.e.drum_roll_beats)
+
+    def test_auto_play_filters_32_beats_before_roll_without_mutating_pattern(self):
+        track = self.e.tracks['drum']
+        track.pattern = [[(36, 100), (38, 100), (39, 100), (42, 100)]]
+        self.e.set_auto_play(True)
+        self.e.auto_pre_roll_parts = ('snare', 'clap', 'toms', 'cymbals')
+        self.e.auto_pre_roll_notes = (38, 39, 41, 45, 50, 49, 51)
+        self.e.roll_due_step = 512
+        self.e.break_due_step = 9999
+        self.e.step = 383
+        self.e.advance()
+        self.assertIn(('on', 10, 38, 100), self.sink.events)
+        self.sink.events.clear()
+        self.e.step = 384
+        self.e.advance()
+        self.assertIn(('on', 10, 36, 100), self.sink.events)
+        self.assertNotIn(('on', 10, 38, 100), self.sink.events)
+        self.assertNotIn(('on', 10, 39, 100), self.sink.events)
+        self.assertEqual([(36, 100), (38, 100), (39, 100), (42, 100)], track.pattern[0])
 
     def test_manual_load_cancels_prepared_auto_transition(self):
         self.e.set_auto_play(True)
@@ -700,7 +755,9 @@ class MenuTests(unittest.TestCase):
         self.m.adjust(1, 2)
         self.assertEqual('ON', self.m.selected_value())
         self.e.start()
-        self.assertEqual(self.e.step + 128 * 4, self.e.auto_due_step)
+        self.assertIsNone(self.e.auto_due_step)
+        self.assertEqual(128, self.e.drum_roll_beats)
+        self.assertEqual((128 + 64) * 4, self.e.auto_next_change()[0])
         self.m.adjust(-1, 3)
         self.assertEqual('OFF', self.m.selected_value())
 
@@ -801,6 +858,8 @@ class MenuTests(unittest.TestCase):
         self.assertIn(('C MAJ', 0, 104, 255), display.texts)
         self.assertIn(('H', 60, 104, 255), display.texts)
         self.assertIn(('124', 104, 104, 255), display.texts)
+        self.assertIn(('R128 *S *B  C *D', 0, 118, 255), display.texts)
+        self.assertFalse(any(label == 'TURN / CLICK' for label, x, y, color in display.texts))
         self.e.drum_genre = 'ELECTRO'
         self.e.bpm = 137
         self.m.render(display)
@@ -818,6 +877,20 @@ class MenuTests(unittest.TestCase):
         self.assertFalse(self.m.bam_active(650))
         self.m.handle(650)
         self.assertTrue(self.m.dirty)
+
+    def test_auto_status_shows_next_instrument_and_beats(self):
+        self.e.start()
+        self.e.set_auto_play(True)
+        self.assertEqual('192B>' + {'lead': 'SYNTH', 'bass': 'BASS',
+                                    'chords': 'CHORD', 'drum': 'DRUMS'}[
+                                        self.e.auto_order[0]], self.m.status_line())
+        self.e.auto_plan = {'order': ['drum', 'lead', 'bass', 'chords']}
+        self.assertEqual('192B>DRUMS', self.m.status_line())
+        self.e.step = 512
+        self.e.advance()
+        self.assertEqual('64B>DRUMS', self.m.status_line())
+        self.m.enter('drum')
+        self.assertIn('AUTO UNMUTED', self.m.rows())
 
     def test_preset_submenu_actions_use_current_channel(self):
         with tempfile.TemporaryDirectory() as directory:

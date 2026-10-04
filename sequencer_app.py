@@ -138,6 +138,8 @@ class App:
             if step != self.last_pulse // 6:
                 self.engine.step = step
                 self.engine.advance()
+                if step % 4 == 0 and self.menu.bam_at is None:
+                    self.menu.dirty = True
                 if self.engine.bpm != self.tempo:
                     self.tempo = self.engine.bpm
                     sequencer.tempo(self.tempo)

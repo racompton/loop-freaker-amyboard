@@ -99,7 +99,8 @@ class Menu:
                     rows += ['CHORD SIZE']
             else:
                 rows += ['GENRE', 'DRUM ROLL']
-            rows += ['UNMUTE' if self.engine.tracks[self.page].muted else 'MUTE']
+            rows += ['AUTO UNMUTED' if self.page == 'drum' and self.engine.auto_play
+                     else 'UNMUTE' if self.engine.tracks[self.page].muted else 'MUTE']
             if self.page == 'drum':
                 rows += ['DRUM PARTS']
             return rows
@@ -218,6 +219,24 @@ class Menu:
                 return 'PLAYING' if e.playing else 'STOPPED'
         return None
 
+    def status_line(self):
+        e = self.engine
+        if e.auto_play:
+            if not e.playing:
+                return 'AUTO PAUSED'
+            due, role = e.auto_next_change()
+            beats = max(0, (due - e.step + 3) // 4) if due is not None else 0
+            return '%dB>%s' % (beats, NAMES[role] if role else 'PREP')
+        due = e.roll_due_step
+        beats = max(0, (due - e.step + 3) // 4) if due is not None else None
+        flags = ' '.join(('*' if not e.tracks[role].muted else ' ') + initial
+                         for role, initial in (('lead', 'S'), ('bass', 'B'),
+                                               ('chords', 'C'), ('drum', 'D')))
+        status = 'R%s %s' % (str(beats) if beats is not None else '--', flags)
+        if len(status) > 16:
+            status = 'R%s %s' % (str(beats), flags.replace(' ', ''))
+        return status[:16]
+
     def adjust(self, delta, now):
         e = self.engine
         rows = self.clamp_index()
@@ -240,7 +259,10 @@ class Menu:
             current = self.genre_candidate or e.drum_genre
             self.genre_candidate = genres[(genres.index(current) + delta) % len(genres)]
         elif self.page == 'drum_roll' and row == 'AUTO EVERY':
-            e.set_drum_roll_beats(e.drum_roll_beats + delta * 32)
+            if e.auto_play:
+                self.show_notice('AUTO ROLL 128', now)
+            else:
+                e.set_drum_roll_beats(e.drum_roll_beats + delta * 32)
         elif self.page == 'channels':
             role = ROLES[self.index]
             if not e.set_channel(role, e.tracks[role].channel + delta):
@@ -315,6 +337,8 @@ class Menu:
                 self.enter('drum_roll')
             elif row == 'DRUM PARTS':
                 self.enter('parts')
+            elif row == 'AUTO UNMUTED':
+                self.show_notice('DRUMS STAY ON', now)
             else:
                 e.toggle_mute(self.page)
         elif self.page == 'settings':
@@ -500,7 +524,7 @@ class Menu:
             footer = self.engine.scale_name
         if footer is not None:
             d.text(footer[:16], 0, 104, 255)
-        d.text('HOLD:BACK' if self.stack else 'TURN / CLICK', 0, 118, 255)
+        d.text(self.status_line()[:16], 0, 118, 255)
         self.dirty = False
 
     def bam_active(self, now):
