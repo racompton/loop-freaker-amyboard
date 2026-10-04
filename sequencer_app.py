@@ -1,5 +1,6 @@
 """Nonblocking AMYboard looper entry point. start() returns to the REPL."""
 import time
+import struct
 import amyboard
 import tulip
 import sequencer
@@ -10,6 +11,51 @@ from loop_sets import Sets
 from loop_preset_preferences import PresetPreferences
 
 _app = None
+
+
+class EncoderSampler:
+    """Poll a seesaw encoder without its two blocking 8 ms register sleeps."""
+    def __init__(self, encoder, position):
+        self.encoder = encoder
+        self.position = position
+        self.pressed = False
+        self.phase = 0
+        self.sent_at = 0
+        self.i2c = None
+        try:
+            dial, dial_index = encoder._map[0]
+            button, button_index = encoder._button_map[0]
+            if dial['seesaw'] and button['addr'] == dial['addr']:
+                self.i2c = amyboard.get_i2c()
+                self.addr = dial['addr']
+                self.dial_index = dial_index
+                self.button_pin = button['button_pins'][button_index]
+                self.offset = encoder._offset[0]
+                self.invert = encoder._invert[0]
+        except (AttributeError, IndexError, KeyError, TypeError):
+            pass
+
+    def poll(self, now):
+        if self.i2c is None:
+            return self.encoder.read(), self.encoder.button()
+        try:
+            if self.phase == 0:
+                self.i2c.writeto(self.addr, bytes((0x11, 0x30 + self.dial_index)))
+                self.sent_at, self.phase = now, 1
+            elif self.phase == 1 and time.ticks_diff(now, self.sent_at) >= 8:
+                raw = struct.unpack('>i', self.i2c.readfrom(self.addr, 4))[0]
+                self.position = self.offset - raw if self.invert else raw - self.offset
+                self.phase = 2
+            elif self.phase == 2:
+                self.i2c.writeto(self.addr, b'\x01\x04')
+                self.sent_at, self.phase = now, 3
+            elif self.phase == 3 and time.ticks_diff(now, self.sent_at) >= 8:
+                mask = struct.unpack('>I', self.i2c.readfrom(self.addr, 4))[0]
+                self.pressed = not bool(mask & (1 << self.button_pin))
+                self.phase = 0
+        except OSError:
+            self.phase = 0
+        return self.position, self.pressed
 
 
 class App:
@@ -26,7 +72,9 @@ class App:
         self.display = amyboard.display
         self.encoder = amyboard.encoder()
         now = time.ticks_ms()
-        self.controls = Controls(now, self.encoder.read(), time.ticks_diff)
+        position = self.encoder.read()
+        self.controls = Controls(now, position, time.ticks_diff)
+        self.sampler = EncoderSampler(self.encoder, position)
         self.set_store = Sets()
         self.menu = Menu(self.engine, now, time.ticks_diff, self.set_store)
         self.menu.io_request = self._queue_io
@@ -195,7 +243,7 @@ class App:
             now = time.ticks_ms()
             self.sink.service(now)
             asleep = self.menu.sleeping
-            position, pressed = self.encoder.read(), self.encoder.button()
+            position, pressed = self.sampler.poll(now)
             wake = asleep and (pressed or position != self.controls.position)
             delta, click, held, activity = self.controls.poll(now, position, pressed, consume=wake)
             self._deliver_input(now, delta, click, held, activity or wake)
@@ -210,19 +258,24 @@ class App:
             animated = self.menu.sleeping
             panel_busy = (hasattr(tulip, 'i2c_bg_pending') and
                           tulip.i2c_bg_pending() > 0)
-            if (self.io_job is None and not panel_busy and
-                    self._clock_slack(9000) and
-                    time.ticks_diff(now, self.last_frame) >= frame_ms and
-                    (wake or animated or self.menu.dirty)):
-                if self.menu.bam_active(now):
-                    self.menu.render_bam(self.display, now)
-                elif self.menu.sleeping:
-                    self.galaxy.render(self.display, self.engine)
+            due = (self.io_job is None and not panel_busy and
+                   time.ticks_diff(now, self.last_frame) >= frame_ms and
+                   (wake or animated or self.menu.dirty))
+            retry = False
+            if due:
+                if self._clock_slack(9000):
+                    if self.menu.bam_active(now):
+                        self.menu.render_bam(self.display, now)
+                    elif self.menu.sleeping:
+                        self.galaxy.render(self.display, self.engine)
+                    else:
+                        self.menu.render(self.display)
+                    amyboard.display_refresh()
+                    self.last_frame = now
                 else:
-                    self.menu.render(self.display)
-                amyboard.display_refresh()
-                self.last_frame = now
-            tulip.defer(self._ui, None, 5 if self.io_job is not None else 20)
+                    retry = True
+            tulip.defer(self._ui, None, 3 if retry else
+                        5 if self.io_job is not None or self.sampler.i2c is not None else 20)
         except Exception as exc:
             self.fail(exc)
 

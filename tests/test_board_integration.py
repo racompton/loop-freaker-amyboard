@@ -35,6 +35,18 @@ class Encoder:
         return self.pressed
 
 
+class SeesawI2C:
+    def __init__(self):
+        self.writes = []
+        self.reads = [bytes((0, 0, 0, 14)), bytes((0xFE, 0xFF, 0xFF, 0xFF))]
+
+    def writeto(self, addr, data):
+        self.writes.append((addr, data))
+
+    def readfrom(self, addr, count):
+        return self.reads.pop(0)
+
+
 class BoardTests(unittest.TestCase):
     def setUp(self):
         self.now = 0
@@ -137,6 +149,39 @@ class BoardTests(unittest.TestCase):
         self.assertTrue(app.engine.tracks['lead'].pattern)
         self.assertFalse(app.engine.playing)
         app.sink.close()
+
+    def test_seesaw_encoder_poll_has_no_blocking_sleep_and_keeps_button_state(self):
+        bus = SeesawI2C()
+        self.board.get_i2c = lambda: bus
+        encoder = types.SimpleNamespace(
+            _map=[({'seesaw': True, 'addr': 0x36}, 0)],
+            _button_map=[({'addr': 0x36, 'button_pins': (24,)}, 0)],
+            _offset=[10], _invert=[False])
+        sampler = self.module.EncoderSampler(encoder, 0)
+        self.assertEqual((0, False), sampler.poll(0))
+        self.assertEqual((0, False), sampler.poll(7))
+        self.assertEqual((4, False), sampler.poll(8))
+        self.assertEqual((4, False), sampler.poll(13))
+        self.assertEqual((4, False), sampler.poll(20))
+        self.assertEqual((4, True), sampler.poll(28))
+        self.assertEqual([(0x36, b'\x11\x30'), (0x36, b'\x01\x04')], bus.writes)
+
+    def test_redraw_retries_near_clock_without_losing_menu_input(self):
+        self.app.engine.set_bpm(174)
+        self.app.last_clock_us = 0
+        self.now = 130
+        self.app.micros = lambda: 7000
+        self.encoder.position = 1
+        before = self.refreshes
+        self.app._ui(None)
+        self.assertEqual(1, self.app.menu.index)
+        self.assertTrue(self.app.menu.dirty)
+        self.assertEqual(before, self.refreshes)
+        self.assertEqual(3, self.deferred[-1][2])
+        self.app.micros = lambda: 2000
+        self.app._ui(None)
+        self.assertFalse(self.app.menu.dirty)
+        self.assertEqual(before + 1, self.refreshes)
 
     def test_scrolling_coalesces_oled_and_waits_for_i2c_queue(self):
         self.tick(0)

@@ -4,7 +4,7 @@ A four-track generative MIDI looper for [AMYboard](https://github.com/shorepine/
 
 ![OLED menu preview](assets/looper-preview.png)
 
-**Current version:** [v0.2.0](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
+**Current version:** [v0.2.1](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
 
 ## What it does
 
@@ -15,7 +15,7 @@ A four-track generative MIDI looper for [AMYboard](https://github.com/shorepine/
 - Groups saved sets by genre, with the oldest first and newest last within each group. A persistent order index keeps that arrangement after reboot. Deleting a set no longer leaves the LOAD cursor past the end of the list.
 - Generates HOUSE, TECHNO, BREAKS, ELECTRO, and DRUM'N'BASS patterns, with genre tempo transitions over 64 beats. Drums can add ghost notes, fills, and a recurring kick breakdown.
 - Sends external MIDI notes and 24-PPQ clock. CV defaults to 1 V/octave with C4 at 0 V and a 5 V gate. Internal AMY sound playback is disabled.
-- Offers an optional note visualizer screensaver, off by default. OLED updates are coalesced to reduce competition with MIDI timing.
+- Offers an optional note visualizer screensaver, off by default. OLED updates are coalesced, and Adafruit seesaw encoder reads are split into short steps so the menu stays responsive at faster genre tempos.
 
 See [SEQUENCER.md](SEQUENCER.md) for the full menu map and behavior.
 

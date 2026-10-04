@@ -223,6 +223,11 @@ first OLED frame is drawn before transport starts. Playback begins at 124 BPM.
 The main-menu footer places an abbreviated key at left, the genre initial near
 the center, and BPM against the right edge. House starts at 124 BPM; selecting
 Techno targets 130 BPM and Breaks targets 135 BPM over the usual 64-beat glide.
+On Adafruit seesaw encoders, the looper splits position and button I²C reads
+across short callbacks while retaining the chip's register-settling time. This
+keeps encoder polling from consuming a whole MIDI-clock interval. A pending OLED
+frame is retried when the next pulse is too close, so genre tempo changes do not
+leave the menu waiting indefinitely for a redraw slot.
 Defaults match the original channels as
 displayed by MIDI equipment: SYNTH 4, BASS 3, CHORD 6, DRUMS 10. CHORD begins
 muted; toms, rimshot, and cymbals begin muted. Muted loops continue advancing in
