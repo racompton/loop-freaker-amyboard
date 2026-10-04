@@ -4,7 +4,7 @@ A four-track generative MIDI looper for [AMYboard](https://github.com/shorepine/
 
 ![OLED menu preview](assets/looper-preview.png)
 
-**Current version:** [v0.1.0](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
+**Current version:** [v0.1.1](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
 
 ## What it does
 
