@@ -13,7 +13,7 @@ import loop_random as random
 PROGRAM_COUNTS = {
     'lead': (26, 51, 40, 17),
     'bass': (101,),
-    'chords': (128, 128),
+    'chords': (128, 72),
     'drum': (128,),
 }
 PREFERRED_WEIGHT = 16

@@ -923,6 +923,16 @@ class SavedSetTests(unittest.TestCase):
         self.assertNotIn('internal_role', restored.snapshot())
         self.assertNotIn('patch', restored.snapshot()['tracks']['lead'])
 
+    def test_older_chord_preset_above_200_clamps_on_load(self):
+        older = self.engine.snapshot()
+        older['tracks']['chords']['bank'] = 1
+        older['tracks']['chords']['program'] = 127
+        validate_set(older)
+        restored = Engine(Sink())
+        restored.queue_load('OLDER SET', older)
+        self.assertEqual((1, 71), (restored.tracks['chords'].bank,
+                                   restored.tracks['chords'].program))
+
     def test_corrupt_set_rejected_without_changing_engine(self):
         name = self.store.save(self.engine.snapshot())
         path = self.store._path(name)
@@ -1011,6 +1021,21 @@ class PresetPreferenceTests(unittest.TestCase):
             self.assertTrue(valid_preset('lead', track.bank, track.program))
         with self.assertRaises(ValueError):
             self.preferences.set_status('lead', 4, 0, 26, 'PREFERRED')
+
+    def test_chord_preset_range_is_200_across_two_midi_banks(self):
+        self.assertEqual((128, 72), PROGRAM_COUNTS['chords'])
+        self.assertEqual((1, 0), move_preset('chords', 0, 127, 1))
+        self.assertEqual((1, 71), move_preset('chords', 0, 0, 199))
+        self.assertEqual((0, 0), move_preset('chords', 1, 71, 1))
+        self.assertFalse(valid_preset('chords', 1, 72))
+        with self.assertRaises(ValueError):
+            self.preferences.set_status('chords', 6, 1, 72, 'PREFERRED')
+        engine = Engine(Sink())
+        engine.preset_preferences = self.preferences
+        for _ in range(100):
+            engine.randomize_preset('chords')
+            track = engine.tracks['chords']
+            self.assertTrue(valid_preset('chords', track.bank, track.program))
 
     def test_legacy_synth_preferences_outside_new_ranges_are_ignored(self):
         with open(self.prefix + '.a.json', 'w') as handle:

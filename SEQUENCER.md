@@ -207,6 +207,8 @@ loadable.
 Each instrument's PRESET row shows its current external MIDI bank and program
 (both numbers on the OLED start at 1). SELECT PRESET lets the knob scroll through
 valid bank/program pairs, sending the selected preset on that MIDI channel.
+CHORD uses 200 presets total: B1 P1–128, then B2 P1–72. Random selection,
+manual scrolling, and preset preferences use this same range.
 Click again to finish editing. PREFER PRESET gives that exact
 bank/program 16 times the normal chance during randomization. DELETE PRESET
 removes it from future random choices; it does not stop the sound currently
