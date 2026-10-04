@@ -488,6 +488,66 @@ class SequencerTests(unittest.TestCase):
         self.assertEqual([(38, 100)], self.e.tracks['drum'].pattern[0])
         self.assertIsNone(self.e.roll_due_step)
 
+    def test_auto_play_prepares_compatible_set_without_changing_live_tracks(self):
+        self.assertFalse(self.e.auto_play)
+        before = self.e.snapshot()
+        self.e.set_auto_play(True)
+        result = {}
+        for _ in self.e.prepare_auto_steps(result):
+            pass
+        plan = result['value']
+        self.assertEqual(before, self.e.snapshot())
+        self.assertEqual(before['scale_name'], plan['old_key'])
+        self.assertIn(plan['new_key'], loop_patterns.camelot_compatible_keys(plan['old_key']))
+        self.assertNotEqual(plan['old_key'], plan['new_key'])
+        self.assertEqual(set(ROLES), set(plan['order']))
+        self.assertEqual(len(ROLES), len(plan['order']))
+        for role in ROLES:
+            self.assertEqual(before['tracks'][role]['channel'],
+                             plan['saved']['tracks'][role]['channel'])
+            self.assertEqual(len(before['tracks'][role]['pattern']),
+                             len(plan['saved']['tracks'][role]['pattern']))
+
+    def test_auto_play_random_order_handoffs_and_128_beat_pause(self):
+        self.e.set_auto_play(True)
+        result = {}
+        for _ in self.e.prepare_auto_steps(result):
+            pass
+        plan = result['value']
+        plan['order'] = ['lead', 'bass', 'chords', 'drum']
+        self.e.auto_plan = plan
+        self.e.roll_due_step = 900
+        notices = []
+        self.e.on_auto = notices.append
+        self.e.step = 512
+        self.e.advance()
+        self.assertEqual(['start', 'lead'], notices)
+        self.assertEqual(plan['old_key'], self.e.scale_name)
+        self.assertEqual(plan['new_key'], self.e.auto_state['new_key'])
+        self.e.step = 640
+        self.e.advance()
+        self.assertEqual('bass', notices[-1])
+        self.e.step = 768
+        self.e.advance()
+        self.assertEqual('chords', notices[-1])
+        self.e.step = 896
+        self.e.advance()
+        self.assertEqual('chords', notices[-1])
+        self.e.step = 900
+        self.e.advance()
+        self.assertEqual(['start', 'lead', 'bass', 'chords', 'drum', 'complete'], notices)
+        self.assertIsNone(self.e.auto_state)
+        self.assertEqual(plan['new_key'], self.e.scale_name)
+        self.assertEqual(900 + 128 * 4, self.e.auto_due_step)
+
+    def test_manual_load_cancels_prepared_auto_transition(self):
+        self.e.set_auto_play(True)
+        self.e.auto_plan = {'signature': self.e.auto_signature()}
+        saved = self.e.snapshot()
+        self.e.queue_load('TEST SET', saved)
+        self.assertIsNone(self.e.auto_plan)
+        self.assertIsNone(self.e.auto_due_step)
+
     def test_snapshot_is_independent_of_live_mutations(self):
         self.e.tracks['drum'].pattern = [[(36, 110)]] * 16
         saved = self.e.snapshot()
@@ -631,6 +691,18 @@ class MenuTests(unittest.TestCase):
         self.assertEqual('OFF', self.m.selected_value())
         self.m.adjust(1, 5)
         self.assertEqual('32 BEATS', self.m.selected_value())
+
+    def test_auto_play_settings_toggle_defaults_off(self):
+        self.m.enter('settings')
+        self.m.index = self.m.rows().index('AUTO PLAY')
+        self.assertEqual('OFF', self.m.selected_value())
+        self.m.click(1)
+        self.m.adjust(1, 2)
+        self.assertEqual('ON', self.m.selected_value())
+        self.e.start()
+        self.assertEqual(self.e.step + 128 * 4, self.e.auto_due_step)
+        self.m.adjust(-1, 3)
+        self.assertEqual('OFF', self.m.selected_value())
 
     def test_genre_turn_only_previews_until_button_confirms(self):
         self.m.enter('drum')
@@ -820,7 +892,7 @@ class MenuTests(unittest.TestCase):
     def test_settings_has_no_internal_sound_editor(self):
         self.m.enter('settings')
         self.assertEqual(['MIDI CHANNELS', 'CV SOURCE', 'TEMPO', 'MIX',
-                          'SCREENSAVER', 'PLAY / STOP'], self.m.rows())
+                          'AUTO PLAY', 'SCREENSAVER', 'PLAY / STOP'], self.m.rows())
 
     def test_tick_wrap_for_idle(self):
         modulus = 1 << 20

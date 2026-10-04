@@ -150,6 +150,22 @@ class BoardTests(unittest.TestCase):
         self.assertFalse(app.engine.playing)
         app.sink.close()
 
+    def test_auto_play_prepares_between_clocks_and_shows_key_transition(self):
+        self.assertFalse(self.app.engine.auto_play)
+        self.app.engine.set_auto_play(True)
+        for pulse in range(20):
+            self.tick(pulse)
+        plan = self.app.engine.auto_plan
+        self.assertIsNotNone(plan)
+        self.assertTrue(self.app.running)
+        self.assertGreaterEqual(self.midi.count(bytes((0xF8,))), 20)
+        plan['order'] = ['lead', 'bass', 'chords', 'drum']
+        self.app.engine.auto_due_step = self.app.engine.step
+        self.tick(24)
+        self.assertIsNotNone(self.app.engine.auto_state)
+        self.assertTrue(any('>' in label for label, x, y, color in self.display.texts
+                            if y == 104))
+
     def test_seesaw_encoder_poll_has_no_blocking_sleep_and_keeps_button_state(self):
         bus = SeesawI2C()
         self.board.get_i2c = lambda: bus

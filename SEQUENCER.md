@@ -123,6 +123,7 @@ SETTINGS
   CV SOURCE       OFF / SYNTH / BASS / CHORD / DRUMS
   TEMPO
   MIX             ON / OFF (default ON)
+  AUTO PLAY       OFF / ON (default OFF)
   SCREENSAVER    OFF / ON
   PLAY / STOP
 ```
@@ -198,6 +199,18 @@ immediately. LOAD → DELETE... lists names, then requires a separate
 DELETE SET choice; deleting a queued set also cancels that pending load.
 Set storage runs in short background steps between MIDI clocks, so the menu
 may briefly show SAVING or LOADING while playback continues.
+
+AUTO PLAY is off by default. When enabled, it prepares four fresh randomized
+instrument loops and presets in small slices between MIDI clock pulses. The
+incoming key is chosen from the current key's Camelot-compatible neighbors.
+After 128 beats, the four instruments enter in a random order. Each incoming
+track gets a randomized mute state; handoffs are 32 beats apart, except DRUMS
+waits for the next drum roll (or the next kick break when rolls are off).
+The main screen shows the current key and incoming key separated by `>` during
+the transition, then returns to the new current key when all four tracks have
+switched. Another transition begins 128 beats after the final handoff. Turning
+AUTO PLAY off lets an active transition finish; manual LOAD takes priority and
+resets the AUTO PLAY wait.
 In LOAD, matching sets have bright lines above and below their names, and the
 selected row says `KEY MATCH` or `OTHER KEY`. Matching uses the playing key and
 the same Camelot neighbors/relative major-minor rule as RANDOMIZE; the marks

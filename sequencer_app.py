@@ -79,10 +79,12 @@ class App:
         self.menu = Menu(self.engine, now, time.ticks_diff, self.set_store)
         self.menu.io_request = self._queue_io
         self.io_job = None
+        self.auto_job = None
         self.last_clock_us = None
         self.micros = time.ticks_us if hasattr(time, 'ticks_us') else lambda: time.ticks_ms() * 1000
         self.engine.on_load = lambda name: self.menu.show_notice('LOADED ' + name, time.ticks_ms())
         self.engine.on_mix = lambda message: self.menu.show_notice(message, time.ticks_ms())
+        self.engine.on_auto = lambda event: setattr(self.menu, 'dirty', True)
         self.galaxy = NoteGalaxy()
         self.engine.on_note = lambda role, note, velocity: (
             self.galaxy.note(role, note, velocity) if self.menu.screensaver_enabled else None)
@@ -233,6 +235,38 @@ class App:
     def _deliver_input(self, now, delta, click, held, activity):
         self.menu.handle(now, delta, click, held, activity)
 
+    def _service_auto(self):
+        engine = self.engine
+        if (not engine.auto_play or not engine.playing or engine.pending_load or
+                engine.mix_state or engine.auto_state):
+            self.auto_job = None
+            return
+        signature = engine.auto_signature()
+        if engine.auto_plan is not None:
+            if engine.auto_plan['signature'] == signature:
+                return
+            engine.auto_plan = None
+        if self.auto_job is not None and self.auto_job['signature'] != signature:
+            self.auto_job = None
+        if self.io_job is not None or not self._clock_slack(12000):
+            return
+        if self.auto_job is None:
+            result = {}
+            self.auto_job = {'signature': signature, 'result': result,
+                             'steps': engine.prepare_auto_steps(result)}
+        job = self.auto_job
+        try:
+            next(job['steps'])
+        except StopIteration:
+            if engine.auto_play and engine.auto_signature() == job['signature']:
+                engine.auto_plan = job['result']['value']
+            self.auto_job = None
+        except Exception as exc:
+            self.auto_job = None
+            print('AUTO PLAY preparation failed:', exc)
+            engine.set_auto_play(False)
+            self.menu.show_notice('AUTO PLAY FAILED', time.ticks_ms())
+
     def _ui(self, _):
         if not self.running:
             return
@@ -251,6 +285,7 @@ class App:
                 self.tempo = self.engine.bpm
                 sequencer.tempo(self.tempo)
             self._service_io(now)
+            self._service_auto()
             # Coalesce fast encoder turns. Never build another OLED frame while
             # the previous background I2C transfer is still on the bus.
             frame_ms = (500 if self.menu.sleeping else

@@ -104,7 +104,7 @@ class Menu:
                 rows += ['DRUM PARTS']
             return rows
         if self.page == 'settings':
-            return ['MIDI CHANNELS', 'CV SOURCE', 'TEMPO', 'MIX',
+            return ['MIDI CHANNELS', 'CV SOURCE', 'TEMPO', 'MIX', 'AUTO PLAY',
                     'SCREENSAVER', 'PLAY / STOP']
         if self.page == 'channels':
             return [NAMES[r] for r in ROLES]
@@ -210,6 +210,8 @@ class Menu:
                 return '%d BPM' % e.bpm
             if row == 'MIX':
                 return 'ON' if e.mix_enabled else 'OFF'
+            if row == 'AUTO PLAY':
+                return 'ON' if e.auto_play else 'OFF'
             if row == 'SCREENSAVER':
                 return 'ON' if self.screensaver_enabled else 'OFF'
             if row == 'PLAY / STOP':
@@ -250,6 +252,8 @@ class Menu:
             e.set_bpm(e.bpm + delta)
         elif self.page == 'settings' and row == 'MIX':
             e.mix_enabled = delta > 0
+        elif self.page == 'settings' and row == 'AUTO PLAY':
+            e.set_auto_play(delta > 0)
         elif self.page == 'settings' and row == 'SCREENSAVER':
             self.screensaver_enabled = delta > 0
             if not self.screensaver_enabled:
@@ -468,7 +472,12 @@ class Menu:
             label = rows[index] if self.page in ('load', 'delete') and len(rows[index]) == 16 else prefix + rows[index]
             d.text(label[:16], 0, y, 0 if selected else 255)
         value = self.selected_value()
-        if self.notice:
+        if self.page == 'main' and self.engine.auto_state is not None:
+            state = self.engine.auto_state
+            keys = compact_key(state['old_key']) + '>' + compact_key(state['new_key'])
+            d.text(keys[:16], max(0, (128 - len(keys) * 8) // 2), 104, 255)
+            footer = None
+        elif self.notice:
             footer = self.notice
         elif value is not None:
             footer = ('SET: ' if self.editing else 'VALUE: ') + value

@@ -10,6 +10,8 @@ CHANNELS = {'lead': 4, 'bass': 3, 'chords': 6, 'drum': 10}  # human, 1..16
 PARTS = ('kick', 'snare', 'toms', 'rimshot', 'clap', 'hats', 'cymbals')
 DRUM_FILL_STEPS = 16  # one bar at sixteenth-note resolution
 DRUM_BREAK_BEATS = 64
+AUTO_WAIT_STEPS = 128 * 4
+AUTO_HANDOFF_STEPS = 32 * 4
 
 
 def clamp(value, low, high):
@@ -39,6 +41,17 @@ class Track:
         self.transpose = 0
         self.bank = 0
         self.program = 0
+
+
+class _SilentSink:
+    def note_off(self, track, note):
+        pass
+
+    def cv(self, volts, channel):
+        pass
+
+    def preset(self, track):
+        pass
 
 
 class Engine:
@@ -76,8 +89,13 @@ class Engine:
         self.mix_enabled = True
         self.mix_state = None
         self.pending_load = None
+        self.auto_play = False
+        self.auto_due_step = None
+        self.auto_plan = None
+        self.auto_state = None
         self.on_load = None
         self.on_mix = None
+        self.on_auto = None
         self._cv_notes = []
         self._cv_gate_high = False
         self.on_note = None
@@ -206,12 +224,17 @@ class Engine:
             self.break_due_step = (DRUM_BREAK_BEATS - self.break_duration_beats) * 4
             self.roll_remaining = self.break_remaining = 0
             self.playing = True
+            if self.auto_play:
+                self.auto_due_step = AUTO_WAIT_STEPS
             self.sink.transport(True)
 
     def stop(self):
         self.playing = False
         self.pending_load = None
         self.mix_state = None
+        self.auto_plan = None
+        self.auto_state = None
+        self.auto_due_step = None
         self.roll_remaining = self.break_remaining = 0
         for role in ROLES:
             self.silence(role)
@@ -487,6 +510,9 @@ class Engine:
     def randomize_all(self):
         self.pending_load = None
         self.mix_state = None
+        self.auto_plan = None
+        self.auto_state = None
+        self.auto_due_step = self.step + AUTO_WAIT_STEPS if self.auto_play else None
         self.phase_origin = self.step
         self.track_origins = {role: self.step for role in ROLES}
         for role in ROLES:
@@ -510,6 +536,125 @@ class Engine:
         for part in PARTS:
             self.drum_muted[part] = random.choice((True, False))
         self.drum_muted['kick'] = False
+
+    def set_auto_play(self, enabled):
+        enabled = bool(enabled)
+        if self.auto_play == enabled:
+            return
+        self.auto_play = enabled
+        if enabled:
+            self.auto_due_step = self.step + AUTO_WAIT_STEPS if self.playing else None
+        else:
+            self.auto_plan = None
+            self.auto_due_step = None
+        # An in-progress transition finishes so its four loops share one key.
+
+    def auto_signature(self):
+        return (self.scale_name, self.drum_genre, self.chord_size,
+                tuple((len(self.tracks[role].pattern), self.tracks[role].channel,
+                       self.tracks[role].octave, self.tracks[role].transpose,
+                       self.tracks[role].direction) for role in ROLES))
+
+    def prepare_auto_steps(self, result):
+        """Build a compatible set off the MIDI callback, one track per slice."""
+        signature = self.auto_signature()
+        source_key = self.scale_name
+        keys = [name for name in patterns.camelot_compatible_keys(source_key)
+                if name != source_key]
+        target_key = random.choice(keys or [source_key])
+        staged = Engine(_SilentSink(), generate=False)
+        staged.scale_name = target_key
+        staged.scale = patterns.SCALE_PRESETS[target_key][:]
+        staged.drum_genre = self.drum_genre
+        staged.bpm = self.bpm
+        staged.chord_size = self.chord_size
+        staged.cv_role = self.cv_role
+        staged.preset_preferences = self.preset_preferences
+        roots = []
+        for role in ('chords', 'bass', 'lead', 'drum'):
+            current = self.tracks[role]
+            target = staged.tracks[role]
+            target.channel = current.channel
+            target.octave = current.octave
+            target.transpose = current.transpose
+            target.direction = current.direction
+            target.pattern = [None] * len(current.pattern)
+            live_roots = patterns.ARRANGER['chord_roots_16ths']
+            patterns.ARRANGER['chord_roots_16ths'] = roots
+            try:
+                staged.randomize_notes(role)
+                roots = patterns.ARRANGER['chord_roots_16ths']
+            finally:
+                patterns.ARRANGER['chord_roots_16ths'] = live_roots
+            staged.randomize_preset(role)
+            target.muted = random.choice((True, False))
+            if role == 'drum':
+                for part in PARTS:
+                    staged.drum_muted[part] = random.choice((True, False))
+                staged.drum_muted['kick'] = False
+            yield
+        snapshot = {}
+        steps = staged.snapshot_steps(snapshot)
+        while True:
+            live_roots = patterns.ARRANGER['chord_roots_16ths']
+            patterns.ARRANGER['chord_roots_16ths'] = roots
+            done = False
+            try:
+                next(steps)
+            except StopIteration:
+                done = True
+            finally:
+                roots = patterns.ARRANGER['chord_roots_16ths']
+                patterns.ARRANGER['chord_roots_16ths'] = live_roots
+            if done:
+                break
+            yield
+        result['value'] = {'signature': signature, 'old_key': source_key,
+                           'new_key': target_key, 'saved': snapshot['value'],
+                           'order': random.sample(ROLES, len(ROLES))}
+
+    def _auto_handoff(self, role, saved):
+        self._restore_track(role, saved['tracks'][role], keep_channel=True)
+        if role == 'chords':
+            patterns.ARRANGER['chord_roots_16ths'] = saved['chord_roots'][:len(self.tracks[role].pattern)]
+            self.chord_roots_stash = saved.get('chord_roots_stash', [])[:len(self.tracks[role].stash)]
+        elif role == 'drum':
+            self.drum_muted = saved['drum_muted'].copy()
+        if self.on_auto:
+            self.on_auto(role)
+
+    def _advance_auto(self, roll_started, break_started):
+        if self.pending_load or self.mix_state:
+            return
+        state = self.auto_state
+        if state is None and self.auto_play and self.auto_due_step is not None and self.step >= self.auto_due_step:
+            plan = self.auto_plan
+            if plan is not None and plan['signature'] == self.auto_signature():
+                self.auto_plan = None
+                state = {'old_key': plan['old_key'], 'new_key': plan['new_key'],
+                         'saved': plan['saved'], 'order': plan['order'],
+                         'index': 0, 'next_at': self.step}
+                self.auto_state = state
+                if self.on_auto:
+                    self.on_auto('start')
+            elif plan is not None:
+                self.auto_plan = None
+        if state is None or self.step < state['next_at']:
+            return
+        role = state['order'][state['index']]
+        if role == 'drum' and not (roll_started if self.drum_roll_beats else break_started):
+            return
+        self._auto_handoff(role, state['saved'])
+        state['index'] += 1
+        if state['index'] == len(state['order']):
+            self.scale_name = state['new_key']
+            self.scale = patterns.SCALE_PRESETS[self.scale_name][:]
+            self.auto_state = None
+            self.auto_due_step = self.step + AUTO_WAIT_STEPS if self.auto_play else None
+            if self.on_auto:
+                self.on_auto('complete')
+        else:
+            state['next_at'] = self.step + AUTO_HANDOFF_STEPS
 
     def randomize_track(self, role):
         """Randomize this track's notes and preset, then make it audible."""
@@ -583,6 +728,9 @@ class Engine:
         return result['value']
 
     def queue_load(self, name, saved, mix=None):
+        self.auto_plan = None
+        self.auto_state = None
+        self.auto_due_step = None
         self.mix_state = None
         if not self.playing:
             self._apply_saved(name, saved)
@@ -661,6 +809,7 @@ class Engine:
         self.roll_remaining = self.break_remaining = 0
         self.pending_load = None
         self.mix_state = None
+        self.auto_due_step = self.step + AUTO_WAIT_STEPS if self.auto_play else None
         if self.on_load:
             self.on_load(name)
 
@@ -699,6 +848,7 @@ class Engine:
         self.roll_due_step = (self.step + self.drum_roll_beats * 4
                               if self.drum_roll_beats else None)
         self.break_due_step = self.step + (DRUM_BREAK_BEATS - self.break_duration_beats) * 4
+        self.auto_due_step = self.step + AUTO_WAIT_STEPS if self.auto_play else None
 
     def _position_at(self, track, step):
         length = len(track.pattern)
@@ -837,6 +987,7 @@ class Engine:
                 self.mix_state = None
                 if self.on_mix:
                     self.on_mix('MIX COMPLETE!')
+        self._advance_auto(roll_started, break_started)
         for role in ROLES:
             track = self.tracks[role]
             notes = self.notes_at(track, self.step - self.track_origins[role])
