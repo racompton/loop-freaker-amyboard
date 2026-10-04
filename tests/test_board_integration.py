@@ -387,6 +387,17 @@ class BoardTests(unittest.TestCase):
         self.assertEqual([], self.amy_messages)
         self.assertIn(bytes((0xF8,)), self.midi)
 
+    def test_minilogue_chord_presets_use_lsb_banks_of_100(self):
+        track = self.app.engine.tracks['chords']
+        for bank, program, lsb, midi_program in (
+                (0, 0, 0, 0), (0, 99, 0, 99),
+                (0, 100, 1, 0), (1, 0, 1, 28), (1, 71, 1, 99)):
+            track.bank, track.program = bank, program
+            self.midi.clear()
+            self.app.sink.preset(track)
+            self.assertEqual([bytes((0xB5, 0, 0)), bytes((0xB5, 32, lsb)),
+                              bytes((0xC5, midi_program))], self.midi)
+
     def test_drum_bank_delay_canceled_on_channel_change(self):
         self.app.engine.randomize_preset('drum')
         self.assertIn(10, self.app.sink.pending_programs)

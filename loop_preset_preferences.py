@@ -30,6 +30,11 @@ def valid_preset(role, bank, program):
             _integer(program, 0, counts[bank] - 1))
 
 
+def preset_number(role, bank, program):
+    """One-based position across the role's stored preset ranges."""
+    return sum(PROGRAM_COUNTS[role][:bank]) + program + 1
+
+
 def move_preset(role, bank, program, delta):
     counts = PROGRAM_COUNTS[role]
     if not valid_preset(role, bank, program):

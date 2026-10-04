@@ -4,13 +4,13 @@ A four-track generative MIDI looper for [AMYboard](https://github.com/shorepine/
 
 ![OLED menu preview](assets/looper-preview.png)
 
-**Current version:** [v0.2.2](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
+**Current version:** [v0.2.3](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
 
 ## What it does
 
 - Starts with a fresh randomized set on every boot. The main **RANDOMIZE** action changes to a Camelot-compatible key and generates new notes, presets, and mutes; each instrument also has its own RANDOMIZE action.
 - Lets you change loop length from 1–64 sixteenth-note steps, note count, octave, playback direction, chord size, MIDI channel, preset, and mute state from the encoder. Shortening and re-expanding a loop restores the same hidden notes.
-- CHORD has 200 selectable presets across B1 P1–128 and B2 P1–72.
+- CHORD shows the Korg minilogue's P1–P200 as one continuous range, sending Bank Select LSB 0/1 and Program Change 0–99 to access both hundreds.
 - Saves sets under unique two-word names and highlights sets compatible with the current key. Preset preferences are specific to the instrument and MIDI channel.
 - With **SETTINGS → MIX** on by default, LOAD brings in BASS on the next beat, SYNTH 32 beats later, CHORD another 32 beats later, and DRUMS at the next automatic roll. If automatic rolls are off, DRUMS enter at the next kick break. The OLED announces each handoff and `MIX COMPLETE!`. Turn MIX off for the original all-at-once load.
 - Groups saved sets by genre, with the oldest first and newest last within each group. A persistent order index keeps that arrangement after reboot. Deleting a set no longer leaves the LOAD cursor past the end of the list.

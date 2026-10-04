@@ -752,8 +752,8 @@ class MenuTests(unittest.TestCase):
             prefs = PresetPreferences(os.path.join(directory, 'preferences'))
             self.e.preset_preferences = prefs
             self.m.enter('chords')
-            self.m.index = self.m.rows().index('PRESET B1 P1')
-            self.assertEqual('PRESET B1 P1', self.m.rows()[self.m.index])
+            self.m.index = self.m.rows().index('PRESET P1')
+            self.assertEqual('PRESET P1', self.m.rows()[self.m.index])
             self.m.click(1)
             self.assertEqual('preset:chords', self.m.page)
             self.assertEqual(['SELECT PRESET', 'PREFER PRESET', 'DELETE PRESET', 'NORMAL PRESET'], self.m.rows())
@@ -767,6 +767,23 @@ class MenuTests(unittest.TestCase):
             self.m.click(4)
             self.assertEqual('DELETED', prefs.status('chords', 5, 0, 0))
             self.assertEqual('PREFERRED', prefs.status('chords', 6, 0, 0))
+
+    def test_chord_preset_menu_shows_one_to_200(self):
+        self.m.enter('chords')
+        track = self.e.tracks['chords']
+        track.bank, track.program = 0, 99
+        self.assertIn('PRESET P100', self.m.rows())
+        self.m.index = self.m.rows().index('PRESET P100')
+        self.m.click(1)
+        self.m.click(2)
+        self.m.handle(3, delta=1)
+        self.assertEqual('P101', self.m.selected_value())
+        self.m.handle(4, delta=28)
+        self.assertEqual('P129', self.m.selected_value())
+        self.m.handle(5, delta=71)
+        self.assertEqual('P200', self.m.selected_value())
+        self.m.handle(6, delta=1)
+        self.assertEqual('P1', self.m.selected_value())
 
     def test_preset_submenu_scrolls_valid_synth_banks(self):
         self.m.enter('lead')

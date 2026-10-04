@@ -87,7 +87,7 @@ BASS / CHORD
   RANDOMIZE
   RANDOM NOTES
   RANDOM PRESET
-  PRESET B1 P1
+  PRESET B1 P1  (BASS) / PRESET P1  (CHORD)
     SELECT PRESET / PREFER PRESET / DELETE PRESET / NORMAL PRESET
   LOOP LENGTH
   DIRECTION      FORWARD / REVERSE / PING PONG / RANDOM
@@ -204,11 +204,16 @@ the same Camelot neighbors/relative major-minor rule as RANDOMIZE; the marks
 update if the playing key changes while LOAD is open. Other-key sets remain
 loadable.
 
-Each instrument's PRESET row shows its current external MIDI bank and program
-(both numbers on the OLED start at 1). SELECT PRESET lets the knob scroll through
-valid bank/program pairs, sending the selected preset on that MIDI channel.
-CHORD uses 200 presets total: B1 P1–128, then B2 P1–72. Random selection,
-manual scrolling, and preset preferences use this same range.
+Each instrument's PRESET row shows its current external MIDI preset. SYNTH,
+BASS, and DRUMS show bank and program, both starting at 1; CHORD shows a single
+number. SELECT PRESET lets the knob scroll through valid choices, sending the
+selected preset on that MIDI channel.
+CHORD targets the original Korg minilogue's 200 programs. Its menu shows one
+continuous P1–P200 range. The looper stores these positions across two internal
+groups for compatibility with existing saved sets and preset preferences, then
+sends MIDI Bank Select MSB 0, LSB 0 or 1, and Program Change 0–99. This reaches
+programs 101–200 without changing their saved-set identities. The minilogue's
+MIDI Rx CC and MIDI Rx Prog Chg settings must be On.
 Click again to finish editing. PREFER PRESET gives that exact
 bank/program 16 times the normal chance during randomization. DELETE PRESET
 removes it from future random choices; it does not stop the sound currently

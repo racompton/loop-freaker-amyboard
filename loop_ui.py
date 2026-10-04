@@ -1,5 +1,6 @@
 """OLED menu state and debounced encoder gestures; no hardware imports."""
 from loop_engine import ROLES, NAMES, PARTS, DIRECTIONS, clamp
+from loop_preset_preferences import preset_number
 import loop_patterns as patterns
 
 
@@ -14,6 +15,12 @@ _SCALE_LABELS = {'Major': 'MAJ', 'Minor': 'MIN', 'Phrygian': 'PHR',
 def compact_key(name):
     root, mode = name.split(' ', 1)
     return (root + ' ' + _SCALE_LABELS.get(mode, mode[:4].upper()))[:7]
+
+
+def preset_label(role, track):
+    if role == 'chords':
+        return 'P%d' % preset_number(role, track.bank, track.program)
+    return 'B%d P%d' % (track.bank + 1, track.program + 1)
 
 
 class Controls:
@@ -84,7 +91,7 @@ class Menu:
         if self.page in ROLES:
             track = self.engine.tracks[self.page]
             rows = ['RANDOMIZE', 'RANDOM NOTES', 'RANDOM PRESET',
-                    'PRESET B%d P%d' % (track.bank + 1, track.program + 1),
+                    'PRESET ' + preset_label(self.page, track),
                     'LOOP LENGTH']
             if self.page != 'drum':
                 rows += ['DIRECTION', 'OCTAVE', '# of NOTES']
@@ -162,7 +169,7 @@ class Menu:
             return None
         row = rows[self.index]
         if self.page in ROLES:
-            if row.startswith('PRESET B'):
+            if row.startswith('PRESET '):
                 track = e.tracks[self.page]
                 if e.preset_preferences:
                     return e.preset_preferences.status(self.page, track.channel,
@@ -192,7 +199,7 @@ class Menu:
             role = self.page[7:]
             track = e.tracks[role]
             if row == 'SELECT PRESET':
-                return 'B%d P%d' % (track.bank + 1, track.program + 1)
+                return preset_label(role, track)
             status = (e.preset_preferences.status(role, track.channel, track.bank, track.program)
                       if e.preset_preferences else 'NORMAL')
             return 'CH%d %s' % (track.channel, status)
@@ -294,7 +301,7 @@ class Menu:
             elif row == 'RANDOM PRESET':
                 e.randomize_preset(self.page)
                 self.show_notice('NEW PRESET!', now)
-            elif row.startswith('PRESET B'):
+            elif row.startswith('PRESET '):
                 self.enter('preset:' + self.page)
             elif row in ('LOOP LENGTH', 'DIRECTION', 'OCTAVE', '# of NOTES', 'CHORD SIZE', 'GENRE'):
                 self.editing = True
@@ -436,7 +443,7 @@ class Menu:
             title = '~L00P FR34K3R~'
         elif self.page.startswith('preset:'):
             track = self.engine.tracks[self.page[7:]]
-            title = 'PRESET B%d P%d' % (track.bank + 1, track.program + 1)
+            title = 'PRESET ' + preset_label(self.page[7:], track)
         elif self.page == 'delete_confirm':
             title = 'DELETE ' + self.delete_name.split(' ')[0]
         elif self.page == 'drum_roll':
@@ -467,7 +474,8 @@ class Menu:
             footer = ('SET: ' if self.editing else 'VALUE: ') + value
         elif self.page in ROLES:
             t = self.engine.tracks[self.page]
-            footer = 'CH%d P%d %s' % (t.channel, t.program + 1, 'MUTE' if t.muted else 'ON')
+            footer = 'CH%d %s %s' % (t.channel, preset_label(self.page, t),
+                                     'MUTE' if t.muted else 'ON')
         elif self.page == 'delete_confirm':
             footer = self.delete_name
         elif self.page == 'main':

@@ -2,6 +2,7 @@
 import time
 import amyboard
 import tulip
+from loop_preset_preferences import preset_number
 
 
 class Outputs:
@@ -35,6 +36,14 @@ class Outputs:
 
     def preset(self, track):
         channel = track.channel - 1
+        if track.role == 'chords':
+            # The original minilogue displays 1–200 but accepts PC 0–99.
+            # CC0 is always 0; CC32 selects either hundred.
+            position = preset_number('chords', track.bank, track.program) - 1
+            tulip.midi_out(bytes((0xB0 | channel, 0, 0)))
+            tulip.midi_out(bytes((0xB0 | channel, 32, position // 100)))
+            tulip.midi_out(bytes((0xC0 | channel, position % 100)))
+            return
         tulip.midi_out(bytes((0xB0 | channel, 0, track.bank)))
         if track.role == 'drum':
             self.pending_programs[track.channel] = (
