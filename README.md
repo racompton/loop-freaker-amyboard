@@ -4,13 +4,13 @@ A four-track generative MIDI looper for [AMYboard](https://github.com/shorepine/
 
 ![OLED menu preview](assets/looper-preview.png)
 
-**Current version:** [v0.5.0](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
+**Current version:** [v0.5.1](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
 
 ## What it does
 
 - Starts with a fresh randomized set on every boot. The main **RANDOMIZE** action changes to a Camelot-compatible key and generates new notes, presets, and mutes; each instrument also has its own RANDOMIZE action.
 - Lets you change loop length from 1–64 sixteenth-note steps, note count, octave, playback direction, chord size, MIDI channel, preset, and mute state from the encoder. Shortening and re-expanding a loop restores the same hidden notes.
-- SETTINGS lets you scroll past occupied MIDI channels (they cannot be selected), set live ghost-note density, configure 1–16 banks of 1–128 presets per instrument, and choose INTERNAL, MIDI IN, CV1 IN, or CV2 IN clock. MIDI IN follows realtime MIDI clock and Start/Stop; CV input uses one rising pulse per beat and fills in 16th steps. These device settings persist across reboots.
+- SETTINGS lets you scroll past occupied MIDI channels (they cannot be selected), configure 1–16 banks of 1–128 presets per instrument, select the instrument feeding the CV outputs, and choose INTERNAL, MIDI IN, CV1 IN, or CV2 IN clock. MIDI IN follows realtime MIDI clock and Start/Stop; CV input uses one rising pulse per beat and fills in 16th steps. The DRUMS menu controls live ghost-note density. Clock, bank, and ghost-note settings persist across reboots.
 - CHORD shows the Korg minilogue's P1–P200 as one continuous range, sending Bank Select LSB 0/1 and Program Change 0–99 to access both hundreds.
 - Saves sets under unique two-word names and highlights sets compatible with the current key. Preset preferences are specific to the instrument and MIDI channel.
 - With **SETTINGS → MIX** on by default, LOAD brings in BASS on the next beat, SYNTH 32 beats later, CHORD another 32 beats later, and DRUMS at the next automatic roll. If automatic rolls are off, DRUMS enter at the next kick break. The OLED announces each handoff and `MIX COMPLETE!`. Turn MIX off for the original all-at-once load.

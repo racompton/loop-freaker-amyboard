@@ -964,9 +964,30 @@ class MenuTests(unittest.TestCase):
 
     def test_settings_has_no_internal_sound_editor(self):
         self.m.enter('settings')
-        self.assertEqual(['MIDI CHANNELS', 'PRESET BANKS', 'GHOST NOTES',
-                          'CLOCK SOURCE', 'CV SOURCE', 'TEMPO', 'MIX',
+        self.assertEqual(['MIDI CHANNELS', 'PRESET BANKS',
+                          'CLOCK SOURCE', 'CV OUTPUT FROM', 'TEMPO', 'MIX',
                           'AUTO PLAY', 'SCREENSAVER', 'PLAY / STOP'], self.m.rows())
+
+    def test_ghost_notes_edit_is_in_drums_and_requests_persistence(self):
+        changed = []
+        self.m.settings_changed = changed.append
+        self.m.enter('drum')
+        self.m.index = self.m.rows().index('GHOST NOTES')
+        self.assertEqual('35%', self.m.selected_value())
+        self.m.click(1)
+        self.m.handle(2, delta=2)
+        self.assertEqual('45%', self.m.selected_value())
+        self.assertEqual([2], changed)
+        self.assertFalse(self.e.tracks['drum'].muted)
+
+    def test_cv_output_from_selects_the_mirrored_instrument(self):
+        self.m.enter('settings')
+        self.m.index = self.m.rows().index('CV OUTPUT FROM')
+        self.assertEqual('SYNTH', self.m.selected_value())
+        self.m.click(1)
+        self.m.handle(2, delta=1)
+        self.assertEqual('BASS', self.m.selected_value())
+        self.assertEqual('bass', self.e.cv_role)
 
     def test_channel_editor_can_pass_occupied_channel_without_selecting_it(self):
         self.m.enter('channels')

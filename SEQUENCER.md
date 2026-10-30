@@ -105,6 +105,7 @@ DRUMS
     SELECT PRESET / PREFER PRESET / DELETE PRESET / NORMAL PRESET
   LOOP LENGTH
   GENRE          HOUSE / TECHNO / BREAKS / ELECTRO / DRUM'N'BASS
+  GHOST NOTES    0–100% in 5% steps; default 35%
   DRUM ROLL
     TRIGGER NOW
     AUTO EVERY    OFF or 32–1024 beats in steps of 32; default 128
@@ -126,9 +127,8 @@ SETTINGS
     SYNTH / BASS / CHORD / DRUMS
       BANK COUNT       1–16
       BANK N PRESETS   1–128 per bank
-  GHOST NOTES      0–100% in 5% steps; default 35%
   CLOCK SOURCE     INTERNAL / MIDI IN / CV1 IN / CV2 IN
-  CV SOURCE       OFF / SYNTH / BASS / CHORD / DRUMS
+  CV OUTPUT FROM   OFF / SYNTH / BASS / CHORD / DRUMS
   TEMPO
   MIX             ON / OFF (default ON)
   AUTO PLAY       OFF / ON (default OFF)
@@ -346,7 +346,7 @@ original 50 ms settling interval without blocking the other tracks. External
 drum attacks during that brief interval are skipped. Program/bank availability
 still depends on the receiving instrument.
 
-CV SOURCE defaults to SYNTH. CV1 is pitch
+CV OUTPUT FROM defaults to SYNTH. CV1 is pitch
 at 1 V/octave, MIDI note 60 (C4) = 0 V. CV2 is a 5 V gate, 0 V when off. Chords
 use their lowest sounding note. Percussion gates release halfway through a
 sixteenth note to give repeated hits a low interval. Muting, rerouting, stopping,
