@@ -56,7 +56,7 @@ def validate_set_steps(data):
         raise ValueError('invalid chord size')
     for name, choices in (('lead_style', LEAD_STYLES), ('bass_style', BASS_STYLES),
                           ('chord_style', CHORD_STYLES), ('drum_style', DRUM_STYLES)):
-        if name in data and data[name] not in choices:
+        if name in data and data[name] not in choices and not (name == 'chord_style' and data[name] == 'ARP'):
             raise ValueError('invalid style')
     for name in ('lead_density', 'bass_density', 'chord_density', 'drum_density'):
         if name in data and not _integer(data[name], 10, 90):

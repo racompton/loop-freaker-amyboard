@@ -328,6 +328,62 @@ def drum_cleanup(pattern):
         if isinstance(pattern[i], list) and len(pattern[i]) == 0:
             pattern[i] = None
 
+
+# Each entry is (closed-hat steps, open-hat steps) within a 16-step bar.
+# The groove is chosen once per randomization and repeated across the loop.
+HAT_GROOVES = {
+    'HOUSE': (
+        ((0, 4, 8, 12), (2, 6, 10, 14)),
+        ((0, 2, 4, 6, 8, 10, 12, 14), ()),
+        ((), (2, 6, 10, 14)),
+    ),
+    'TECHNO': (
+        ((0, 4, 8, 12), (2, 6, 10, 14)),
+        ((0, 2, 4, 6, 8, 10, 12, 14), ()),
+        ((0, 2, 3, 4, 6, 8, 10, 11, 12, 14), ()),
+    ),
+    'BREAKS': (
+        ((0, 2, 5, 7, 8, 10, 13, 15), ()),
+        ((0, 2, 4, 6, 8, 10, 12), (14,)),
+        ((0, 2, 3, 6, 8, 10, 11, 14), ()),
+    ),
+    'ELECTRO': (
+        ((2, 6, 10, 14), ()),
+        ((0, 2, 6, 8, 10, 14), ()),
+        ((0, 2, 6, 8, 10, 14), (15,)),
+    ),
+    "DRUM'N'BASS": (
+        ((0, 2, 4, 6, 8, 10, 12, 14), ()),
+        ((0, 2, 3, 6, 8, 10, 11, 14), ()),
+        ((0, 2, 4, 6, 7, 8, 10, 12, 14, 15), ()),
+    ),
+}
+
+
+def randomize_genre_hats(cells, visible_length, genre):
+    """Replace hats in the fixed note bank without touching other drum parts."""
+    if genre not in HAT_GROOVES:
+        raise ValueError('unknown drum genre')
+    closed, opened = random.choice(HAT_GROOVES[genre])
+    result = []
+    for i, cell in enumerate(cells):
+        hits = [(note, velocity) for note, velocity in (cell or [])
+                if note not in DRUM_PARTS['hats']]
+        beat = i % STEPS_PER_BAR
+        if beat in closed:
+            hits.append((42, random.randint(65, 95) if beat % 4 == 0
+                         else random.randint(75, 110)))
+        elif beat in opened:
+            hits.append((46, random.randint(80, 110)))
+        result.append(hits or None)
+    if visible_length and not any(
+            any(note in DRUM_PARTS['hats'] for note, _ in (cell or []))
+            for cell in result[:visible_length]):
+        hits = list(result[0] or [])
+        hits.append((42, random.randint(75, 100)))
+        result[0] = hits
+    return result
+
 def drum_randomize_part_free(pattern, part):
     """Wipe the given part and place hits randomly across the bar (16 steps)."""
     LOOP_LENGTH = STEPS_PER_BAR

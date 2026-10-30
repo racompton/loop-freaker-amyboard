@@ -60,16 +60,24 @@ class SequencerTests(unittest.TestCase):
         self.assertEqual(3, len([x for x in self.sink.events if x[0] == 'off']))
         self.assertIn(('cv', 1, 0), self.sink.events)
 
-    def test_chord_hold_arp_and_hit_styles(self):
+    def test_chord_hold_staccato_and_hit_styles(self):
         track = self.e.tracks['chords']
         track.pattern = [[60, 64, 67]] * 4 + [None]
         track.lengths = [1, 1, 1, 1, 0]
         track.muted = False
         self.e.chord_style = 'HOLD'
         self.assertEqual([60, 64, 67], [n for n, _ in self.e.notes_at(track, 1)])
-        self.e.chord_style = 'ARP'
-        self.assertEqual([60, 64, 67, 60],
-                         [self.e.notes_at(track, step)[0][0] for step in range(4)])
+        self.e.chord_style = 'STACCATO'
+        self.assertEqual([60, 64, 67], [n for n, _ in self.e.notes_at(track, 1)])
+        self.e.step = 0
+        self.sink.events.clear()
+        self.e.advance()
+        self.assertEqual(3, len([event for event in self.sink.events if event[0] == 'on' and event[1] == track.channel]))
+        self.e.release_drums()
+        self.assertEqual(3, len([event for event in self.sink.events if event[0] == 'off' and event[1] == track.channel]))
+        self.sink.events.clear()
+        self.e.advance()
+        self.assertEqual(3, len([event for event in self.sink.events if event[0] == 'on' and event[1] == track.channel]))
         self.e.chord_style = 'HIT'
         self.assertEqual([60, 64, 67], [n for n, _ in self.e.notes_at(track, 0)])
         self.assertEqual([], self.e.notes_at(track, 1))
@@ -78,6 +86,43 @@ class SequencerTests(unittest.TestCase):
         track.pattern = [[60, 64, 67]] * 4
         track.lengths = [1] * 4
         self.assertEqual([60, 64, 67], [n for n, _ in self.e.notes_at(track, 4)])
+
+    def test_genre_hat_randomization_preserves_other_parts_and_hidden_steps(self):
+        track = self.e.tracks['drum']
+        for genre in loop_patterns.DRUM_GENRES:
+            self.e.drum_genre = genre
+            for _ in range(8):
+                track.pattern = [[(36, 110), (42, 75)] for _ in range(16)]
+                track.stash = [[(38, 98), (46, 85)] for _ in range(48)]
+                track.lengths = [1] * 16
+                track.lengths_stash = [1] * 48
+                self.e.randomize_part('hats')
+                bank = track.pattern + track.stash
+                self.assertEqual(64, len(bank))
+                self.assertTrue(all((36, 110) in cell for cell in bank[:16]))
+                self.assertTrue(all((38, 98) in cell for cell in bank[16:]))
+                hats = [tuple(note for note, _ in (cell or []) if note in (42, 46)) for cell in bank]
+                self.assertTrue(any(hats[:16]))
+                self.assertEqual(hats[:16], hats[16:32])
+                self.assertEqual(hats[:16], hats[32:48])
+                closed = tuple(i for i, hit in enumerate(hats[:16]) if hit == (42,))
+                opened = tuple(i for i, hit in enumerate(hats[:16]) if hit == (46,))
+                self.assertIn((closed, opened), loop_patterns.HAT_GROOVES[genre])
+
+    def test_short_hat_loop_keeps_audible_hit(self):
+        track = self.e.tracks['drum']
+        track.pattern, track.stash = [[(36, 100)]], [None] * 63
+        self.e.drum_genre = 'HOUSE'
+        with patch.object(loop_random, 'choice', return_value=((), (2, 6, 10, 14))):
+            self.e.randomize_part('hats')
+        self.assertIn(42, [note for note, _ in track.pattern[0]])
+
+    def test_legacy_saved_arp_style_loads_as_staccato(self):
+        saved = self.e.snapshot()
+        saved['chord_style'] = 'ARP'
+        validate_set(saved)
+        self.e._apply_saved('OLD', saved)
+        self.assertEqual('STACCATO', self.e.chord_style)
 
     def test_randomize_selects_new_character_and_length_for_each_unlocked_track(self):
         self.e.track_locks['bass'] = True

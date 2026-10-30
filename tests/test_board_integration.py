@@ -336,6 +336,31 @@ class BoardTests(unittest.TestCase):
         self.assertEqual([(0, 1), (1, 9), (2, 13), (3, 21)], advances)
         self.assertEqual(24, self.midi.count(bytes((0xF8,))))
 
+    def test_staccato_sends_full_chord_and_releases_halfway_through_step(self):
+        engine = self.app.engine
+        for track in engine.tracks.values():
+            track.muted = True
+        chords = engine.tracks['chords']
+        chords.muted = False
+        chords.pattern = [[60, 64, 67]] * 4
+        chords.lengths = [1] * 4
+        engine.chord_style = 'STACCATO'
+        self.midi.clear()
+        for pulse in range(3):
+            self.app._tick(pulse * 2)
+        self.assertEqual(3, sum(message[0] == 0x95 for message in self.midi))
+        self.assertEqual(0, sum(message[0] == 0x85 for message in self.midi))
+        self.app._tick(6)
+        self.assertEqual(3, sum(message[0] == 0x85 for message in self.midi))
+        for pulse in (4, 5, 6):
+            self.app._tick(pulse * 2)
+        self.assertEqual(6, sum(message[0] == 0x95 for message in self.midi))
+
+    def test_old_device_arp_setting_loads_as_staccato(self):
+        with open(self.set_dir.name + '/settings.json', 'w') as handle:
+            handle.write('{"version":1,"chord_style":"ARP"}')
+        self.assertEqual('STACCATO', self.module.DeviceSettings().chord_style)
+
     def test_amyboard_uses_direct_trs_uart_for_notes_and_clock(self):
         writes = []
         ports = []

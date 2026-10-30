@@ -10,7 +10,7 @@ CHANNELS = {'lead': 4, 'bass': 3, 'chords': 6, 'drum': 10}  # human, 1..16
 PARTS = ('kick', 'snare', 'toms', 'rimshot', 'clap', 'hats', 'cymbals')
 LEAD_STYLES = ('MELODIC', 'MINIMAL', 'BUSY')
 BASS_STYLES = ('GROOVE', 'ROOTS', 'WALKING')
-CHORD_STYLES = ('HOLD', 'ARP', 'HIT')
+CHORD_STYLES = ('HOLD', 'STACCATO', 'HIT')
 DRUM_STYLES = ('GROOVE', 'SPARSE', 'BUSY')
 DRUM_FILL_STEPS = 32  # default eight beats at sixteenth-note resolution
 DRUM_BREAK_BEATS = 64
@@ -1133,6 +1133,16 @@ class Engine:
     def randomize_part(self, part):
         self.silence('drum')
         track = self.tracks['drum']
+        if part == 'hats':
+            self._sync_lengths('drum')
+            length = len(track.pattern)
+            cells = patterns.randomize_genre_hats(track.pattern + track.stash,
+                                                   length, self.drum_genre)
+            track.pattern, track.stash = cells[:length], cells[length:]
+            track.lengths = [1 if cell is not None else 0 for cell in track.pattern]
+            track.lengths_stash = [1 if cell is not None else 0 for cell in track.stash]
+            self.drum_muted['kick'] = False
+            return
         for start in range(0, len(track.pattern), 16):
             bar = track.pattern[start:start+16]
             while len(bar) < 16:
@@ -1249,7 +1259,10 @@ class Engine:
         for suffix in ('style', 'density'):
             name = prefix + '_' + suffix
             if name in saved:
-                setattr(self, name, saved[name])
+                value = saved[name]
+                if name == 'chord_style' and value == 'ARP':
+                    value = 'STACCATO'  # v0.7 saved sets remain loadable
+                setattr(self, name, value)
 
     def _apply_saved(self, name, saved):
         for role in ROLES:
@@ -1390,8 +1403,6 @@ class Engine:
                 return []
             if track.pattern[position] is None:
                 return []
-        if track.role == 'chords' and self.chord_style == 'ARP' and items:
-            items = [items[step % len(items)]]
         result = []
         seen = set()
         shift = track.transpose + track.octave * 12
@@ -1525,7 +1536,7 @@ class Engine:
                         0 < self.roll_due_step - self.step <= AUTO_PRE_ROLL_STEPS):
                     notes = [(note, velocity) for note, velocity in notes
                              if note not in self.auto_pre_roll_notes]
-            if notes != track.active or role == 'drum' or (role == 'chords' and self.chord_style == 'ARP'):
+            if notes != track.active or role == 'drum' or (role == 'chords' and self.chord_style == 'STACCATO'):
                 self.silence(role)
                 # Pitch must settle before gate rises.
                 self._mirror(role, notes)
@@ -1543,3 +1554,5 @@ class Engine:
     def release_drums(self):
         # Half-step percussion gates give repeated hits a real low interval.
         self.silence('drum')
+        if self.chord_style == 'STACCATO':
+            self.silence('chords')

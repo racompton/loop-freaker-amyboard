@@ -4,13 +4,13 @@ A four-track generative MIDI looper for [AMYboard](https://github.com/shorepine/
 
 ![OLED menu preview](assets/looper-preview.png)
 
-**Current version:** [v0.7.0](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
+**Current version:** [v0.7.1](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
 
 ## What it does
 
 - Starts with a fresh randomized set on every boot. The main **RANDOMIZE** action changes to a Camelot-compatible key and generates new notes, presets, and mutes; each instrument also has its own RANDOMIZE action.
 - Lets you change loop length from 1–64 sixteenth-note steps, note count, octave, playback direction, chord size, MIDI channel, preset, and mute state from the encoder. Shortening and re-expanding a loop restores the same hidden notes.
-- SYNTH generates chord-aware melodic motifs and offers small variations, styles, and density; all four instruments have style and density controls. CHORD can hold, arpeggiate, or hit its voicings. RANDOMIZE also chooses loop length and character. A PERFORM page groups track and kick mutes, variation, drum roll, and tempo, with optional next-bar actions. LOCKS can protect the key, tracks, and presets from randomization and AUTO PLAY. Drum rolls have adjustable 4–32 beat length.
+- SYNTH generates chord-aware melodic motifs and offers small variations, styles, and density; all four instruments have style and density controls. CHORD can hold its voicings, repeat them staccato, or hit each once. Randomizing hi-hats uses a groove for the selected drum genre. RANDOMIZE also chooses loop length and character. A PERFORM page groups track and kick mutes, variation, drum roll, and tempo, with optional next-bar actions. LOCKS can protect the key, tracks, and presets from randomization and AUTO PLAY. Drum rolls have adjustable 4–32 beat length.
 - SETTINGS lets you scroll past occupied MIDI channels (they cannot be selected), configure 1–16 banks of 1–128 presets per instrument, set 16th-note swing, select the instrument feeding the CV outputs, and choose INTERNAL, MIDI IN, CV1 IN, or CV2 IN clock. MIDI IN follows realtime MIDI clock and Start/Stop; CV input uses one rising pulse per beat and fills in 16th steps. The DRUMS menu controls ghost-note density, velocity, and whether ghosts can use muted parts. These settings persist across reboots.
 - CHORD shows the Korg minilogue's P1–P200 as one continuous range, sending Bank Select LSB 0/1 and Program Change 0–99 to access both hundreds.
 - Saves sets under unique two-word names and highlights sets compatible with the current key. Preset preferences are specific to the instrument and MIDI channel.

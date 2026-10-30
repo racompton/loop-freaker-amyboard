@@ -96,7 +96,7 @@ BASS / CHORD
     SELECT PRESET / PREFER PRESET / DELETE PRESET / NORMAL PRESET
   LOOP LENGTH
   STYLE / DENSITY (BASS: GROOVE / ROOTS / WALKING;
-                   CHORD: HOLD / ARP / HIT)
+                   CHORD: HOLD / STACCATO / HIT)
   DIRECTION      FORWARD / REVERSE / PING PONG / RANDOM
   OCTAVE
   # of NOTES
@@ -159,10 +159,16 @@ device settings. BASS adds root anchors on available kick beats; SYNTH sometimes
 leaves space at chord changes. During AUTO PLAY, generated synth notes favor
 pitch classes shared by the outgoing and incoming keys.
 
-CHORD STYLE also affects the current loop: HOLD sustains chord voicings, ARP
-repeats their notes as sixteenths, and HIT plays a short chord at each new
-voicing. DRUMS STYLE varies the pattern within the selected genre and does not
+CHORD STYLE also affects the current loop: HOLD sustains chord voicings,
+STACCATO repeats the full chord on sixteenth-note steps with a half-step gate,
+and HIT plays one short chord at each new voicing. Saved sets and device settings
+using the old ARP style load as STACCATO. DRUMS STYLE varies the pattern within the selected genre and does not
 change the genre or tempo. DENSITY controls each instrument independently.
+
+DRUMS → DRUM PARTS → HATS → RANDOM NOTES chooses a recognizable closed/open
+hat groove for the selected genre and repeats it across the fixed note bank.
+It preserves other drum parts and the hats' mute state. A very short loop is
+guaranteed at least one hat hit; widening it reveals the same generated tail.
 
 PERFORM provides track and kick mutes, a synth VARIATION, a drum roll, and TEMPO
 in one page. Each mute row says MUTE or UNMUTE according to its current state.

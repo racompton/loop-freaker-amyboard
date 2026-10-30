@@ -47,8 +47,9 @@ class DeviceSettings:
                 self.lead_style = data['lead_style']
             if data.get('bass_style') in ('GROOVE', 'ROOTS', 'WALKING'):
                 self.bass_style = data['bass_style']
-            if data.get('chord_style') in ('HOLD', 'ARP', 'HIT'):
-                self.chord_style = data['chord_style']
+            if data.get('chord_style') in ('HOLD', 'STACCATO', 'ARP', 'HIT'):
+                self.chord_style = ('STACCATO' if data['chord_style'] == 'ARP'
+                                    else data['chord_style'])
             if data.get('drum_style') in ('GROOVE', 'SPARSE', 'BUSY'):
                 self.drum_style = data['drum_style']
             for name in ('lead_density', 'bass_density', 'chord_density', 'drum_density'):
