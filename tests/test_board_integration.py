@@ -186,14 +186,14 @@ class BoardTests(unittest.TestCase):
         self.app.engine.set_bpm(174)
         self.app.last_clock_us = 0
         self.now = 130
-        self.app.micros = lambda: 7000
+        self.app.micros = lambda: 3000
         self.encoder.position = 1
         before = self.refreshes
         self.app._ui(None)
         self.assertEqual(1, self.app.menu.index)
         self.assertTrue(self.app.menu.dirty)
         self.assertEqual(before, self.refreshes)
-        self.assertEqual(3, self.deferred[-1][2])
+        self.assertEqual(10, self.deferred[-1][2])
         self.app.micros = lambda: 2000
         self.app._ui(None)
         self.assertFalse(self.app.menu.dirty)
@@ -211,10 +211,10 @@ class BoardTests(unittest.TestCase):
         self.module.tulip.i2c_bg_pending = lambda: 0
         self.now += 130
         self.app._ui(None)
-        self.assertTrue(self.app.menu.dirty)
+        self.assertEqual(0, self.app.controls.position)
         self.app._tick(50)
         self.app._ui(None)
-        self.assertFalse(self.app.menu.dirty)
+        self.assertEqual(24, self.app.controls.position)
         self.assertEqual(initial + 1, self.refreshes)
 
     def test_clock_notes_midi_and_cv_run_together(self):
@@ -228,8 +228,58 @@ class BoardTests(unittest.TestCase):
         self.assertIn(bytes((0x93, 60, 100)), self.midi)
         self.assertIn(bytes((0x92, 60, 100)), self.midi)
         self.assertIn((1, 5), self.cv)
+
+    def test_firmware_clock_mode_is_disabled_and_python_sends_clock(self):
+        sync = []
+        self.module.tulip.external_midi_sync = lambda *args, **kwargs: sync.append((args, kwargs))
+        self.app.stop()
+        self.app = self.module.App()
+        self.app.start()
+        self.assertFalse(self.app.sink.native_clock)
+        self.assertEqual(96, self.sequences[-1].divider)
+        self.assertEqual([((False,), {})], sync)
+        self.midi.clear()
+        lead = self.app.engine.tracks['lead']
+        lead.pattern = [60]
+        lead.muted = False
+        for tick in (0, 2, 4, 6, 8, 10, 12):
+            self.app._tick(tick)
+        self.assertIn(bytes((0x93, 60, 100)), self.midi)
+        self.assertEqual(7, self.midi.count(bytes((0xF8,))))
+        self.app.stop()
         self.assertIn((1, 0), self.cv)
         self.assertEqual([], self.amy_messages)
+
+    def test_amyboard_uses_direct_trs_uart_for_notes_and_clock(self):
+        writes = []
+        ports = []
+        restored = []
+
+        class UART:
+            def __init__(self, number, **kwargs):
+                ports.append((number, kwargs))
+
+            def write(self, data):
+                writes.append(bytes(data))
+                return len(data)
+
+            def deinit(self):
+                restored.append('closed')
+
+        self.app.stop()
+        self.module.tulip.board = lambda: 'AMYBOARD'
+        self.board.midi_type = lambda: 'B'
+        self.board.set_midi_type = lambda value: restored.append(value)
+        with patch.dict(sys.modules, {'machine': types.SimpleNamespace(UART=UART)}):
+            self.app = self.module.App()
+            self.app.start()
+            self.app._tick(0)
+            self.app.stop()
+        self.assertEqual([(2, {'baudrate': 31250, 'tx': 15})], ports)
+        self.assertIn(bytes((0xFA,)), writes)
+        self.assertIn(bytes((0xF8,)), writes)
+        self.assertIn(bytes((0xFC,)), writes)
+        self.assertEqual(['closed', 'B'], restored)
 
     def test_idle_menu_does_not_redraw_oled_or_start_screensaver(self):
         initial = self.refreshes

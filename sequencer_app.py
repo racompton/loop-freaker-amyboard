@@ -101,16 +101,14 @@ class App:
         amyboard.display_refresh()
         self.last_frame = time.ticks_ms()
         sequencer.tempo(self.tempo)
-        self.engine.start()
-        # 96 divisions/bar = 24 MIDI clock pulses/quarter. Driven by AMY's
-        # clock rather than accumulating sleep() and OLED transfer durations.
         self.sequence = sequencer.TulipSequence(96, self._tick)
         if hasattr(tulip, 'sequencer_start'):
             tulip.sequencer_start()
+        self.engine.start()
         tulip.defer(self._ui, None, 20)
 
     def _clock_slack(self, reserve_us):
-        """Keep UI work away from the next 24-PPQ MIDI pulse."""
+        """Keep UI work away from the next Python note callback."""
         if not self.engine.playing:
             return True
         if self.last_clock_us is None:
@@ -139,7 +137,7 @@ class App:
                 self.engine.step = step
                 self.engine.advance()
                 if step % 4 == 0 and self.menu.bam_at is None:
-                    self.menu.dirty = True
+                    self.menu.status_dirty = True
                 if self.engine.bpm != self.tempo:
                     self.tempo = self.engine.bpm
                     sequencer.tempo(self.tempo)
@@ -273,13 +271,16 @@ class App:
         if not self.running:
             return
         try:
-            if not self._clock_slack(5500):
-                tulip.defer(self._ui, None, 3)
+            if not self._clock_slack(9000):
+                tulip.defer(self._ui, None, 10)
                 return
             now = time.ticks_ms()
             self.sink.service(now)
+            panel_busy = (hasattr(tulip, 'i2c_bg_pending') and
+                          tulip.i2c_bg_pending() > 0)
             asleep = self.menu.sleeping
-            position, pressed = self.sampler.poll(now)
+            position, pressed = ((self.sampler.position, self.sampler.pressed)
+                                 if panel_busy else self.sampler.poll(now))
             wake = asleep and (pressed or position != self.controls.position)
             delta, click, held, activity = self.controls.poll(now, position, pressed, consume=wake)
             self._deliver_input(now, delta, click, held, activity or wake)
@@ -291,28 +292,28 @@ class App:
             # Coalesce fast encoder turns. Never build another OLED frame while
             # the previous background I2C transfer is still on the bus.
             frame_ms = (500 if self.menu.sleeping else
-                        120 if hasattr(tulip, 'i2c_bg_write') else 250)
+                        120 if self.menu.dirty else 400)
             animated = self.menu.sleeping
-            panel_busy = (hasattr(tulip, 'i2c_bg_pending') and
-                          tulip.i2c_bg_pending() > 0)
             due = (self.io_job is None and not panel_busy and
                    time.ticks_diff(now, self.last_frame) >= frame_ms and
-                   (wake or animated or self.menu.dirty))
+                   (wake or animated or self.menu.dirty or self.menu.status_dirty))
             retry = False
             if due:
-                if self._clock_slack(9000):
+                if self._clock_slack(12000):
                     if self.menu.bam_active(now):
                         self.menu.render_bam(self.display, now)
                     elif self.menu.sleeping:
                         self.galaxy.render(self.display, self.engine)
-                    else:
+                    elif self.menu.dirty:
                         self.menu.render(self.display)
+                    else:
+                        self.menu.render_status(self.display)
                     amyboard.display_refresh()
                     self.last_frame = now
                 else:
                     retry = True
-            tulip.defer(self._ui, None, 3 if retry else
-                        5 if self.io_job is not None or self.sampler.i2c is not None else 20)
+            tulip.defer(self._ui, None, 10 if retry or self.io_job is not None or
+                        self.sampler.i2c is not None else 20)
         except Exception as exc:
             self.fail(exc)
 

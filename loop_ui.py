@@ -84,6 +84,7 @@ class Menu:
         self.notice_at = now
         self.bam_at = None
         self.dirty = True
+        self.status_dirty = False
 
     def rows(self):
         if self.page == 'main':
@@ -526,6 +527,13 @@ class Menu:
             d.text(footer[:16], 0, 104, 255)
         d.text(self.status_line()[:16], 0, 118, 255)
         self.dirty = False
+        self.status_dirty = False
+
+    def render_status(self, d):
+        """Change just the countdown row; keep the rest of the menu framebuffer."""
+        d.fill_rect(0, 116, 128, 12, 0)
+        d.text(self.status_line()[:16], 0, 118, 255)
+        self.status_dirty = False
 
     def bam_active(self, now):
         return self.bam_at is not None and 0 <= self.diff(now, self.bam_at) < 640
@@ -554,6 +562,7 @@ class Menu:
         d.fill_rect(43, 52, 46, 18, 255)
         d.text('BAM!', 50, 57, 0)
         self.dirty = False
+        self.status_dirty = False
 
 
 class NoteGalaxy:

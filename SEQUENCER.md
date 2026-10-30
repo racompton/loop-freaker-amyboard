@@ -46,7 +46,7 @@ on the board for rollback, but the looper no longer imports them or plays AMY
 internal audio. No `mido`, desktop Python packages or additional OLED driver
 files are needed on the board.
 The display uses AMYboard's SSD1327/SH1107 support; the encoder uses the unified
-accessory API. MIDI OUT retains the board's configured TRS A/B mode.
+accessory API. MIDI OUT uses the board's configured TRS A/B pin at 31,250 baud.
 
 After copying, reset the board. Hold the encoder button during the recovery
 window to skip the sequencer. From the REPL you can stop or restart it:
@@ -289,6 +289,14 @@ CV setup; Python display work cannot provide a hard real-time guarantee.
 All four tracks transmit external MIDI. No internal AMY sound is played.
 MIDI clock is 24 pulses per quarter note, with Start/Stop messages. Preset
 randomization uses these bank/program ranges:
+
+On physical AMYboard, the looper writes directly to the TRS MIDI UART. On the
+tested firmware, `tulip.midi_out()` took about one second per message and
+stalled both playback and the OLED. The direct UART kept 124 BPM playback in
+time with the board sequencer during the on-board test. USB MIDI OUT is not
+mirrored by this path; connect external instruments to the TRS MIDI OUT jack.
+The TRS A/B type is read when the looper starts, so restart it after changing
+`amyboard.set_midi_type()`.
 
 | Track | OLED bank | OLED programs |
 |---|---:|---:|

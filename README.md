@@ -4,7 +4,7 @@ A four-track generative MIDI looper for [AMYboard](https://github.com/shorepine/
 
 ![OLED menu preview](assets/looper-preview.png)
 
-**Current version:** [v0.4.0](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
+**Current version:** [v0.4.1](VERSION) · [Download releases](https://github.com/racompton/loop-freaker-amyboard/releases)
 
 ## What it does
 
@@ -16,7 +16,7 @@ A four-track generative MIDI looper for [AMYboard](https://github.com/shorepine/
 - Optional **SETTINGS → AUTO PLAY** creates fresh Camelot-compatible loops and presets, then brings the four instruments in at 32-beat intervals in a random order, beginning 64 beats after a drum roll. Rolls repeat every 128 beats; snare, clap, and two other random drum parts drop out for 32 beats before each roll. DRUMS stays unmuted and at least two melodic instruments remain audible. The OLED shows the old/new keys during transitions and a countdown to the next instrument switch. AUTO PLAY is off by default; when off, the bottom line shows the drum-roll countdown and instrument mute states.
 - Groups saved sets by genre, with the oldest first and newest last within each group. A persistent order index keeps that arrangement after reboot. Deleting a set no longer leaves the LOAD cursor past the end of the list.
 - Generates HOUSE, TECHNO, BREAKS, ELECTRO, and DRUM'N'BASS patterns, with genre tempo transitions over 64 beats. Drums can add ghost notes, fills, and a recurring kick breakdown.
-- Sends external MIDI notes and 24-PPQ clock. CV defaults to 1 V/octave with C4 at 0 V and a 5 V gate. Internal AMY sound playback is disabled.
+- Sends external MIDI notes and 24-PPQ clock through the AMYboard TRS MIDI OUT jack. CV defaults to 1 V/octave with C4 at 0 V and a 5 V gate. Internal AMY sound playback is disabled.
 - Offers an optional note visualizer screensaver, off by default. OLED updates are coalesced, and Adafruit seesaw encoder reads are split into short steps so the menu stays responsive at faster genre tempos.
 
 See [SEQUENCER.md](SEQUENCER.md) for the full menu map and behavior.
@@ -26,6 +26,12 @@ See [SEQUENCER.md](SEQUENCER.md) for the full menu map and behavior.
 - AMYboard running recent Tulip/AMYboard MicroPython firmware with `amyboard.encoder()`, `amyboard.cv_out()`, and `sequencer.TulipSequence`.
 - A supported 128×128 SSD1327 or SH1107 OLED and rotary encoder on the board's **front I²C accessory port**.
 - External MIDI instrument or interface for sound; optional CV destination.
+
+The physical board uses a direct 31,250-baud UART path for TRS MIDI OUT. On the
+tested firmware, `tulip.midi_out()` could block for roughly one second per
+message and stall playback; the direct path kept the clock and menu responsive.
+USB MIDI OUT is not mirrored by this path. The looper reads the board's Type A/B
+setting when it starts, so restart the looper after changing that setting.
 
 The OLED and encoder are detected by AMYboard's built-in drivers. See the [AMYboard accessory guide](https://github.com/shorepine/tulipcc/blob/main/docs/amyboard/accessories.md) for wiring and compatible controls.
 
