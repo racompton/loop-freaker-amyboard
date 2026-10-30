@@ -105,7 +105,7 @@ class Menu:
                 if self.page == 'chords':
                     rows += ['CHORD SIZE']
             else:
-                rows += ['GENRE', 'GHOST NOTES', 'DRUM ROLL']
+                rows += ['GENRE', 'GHOST NOTES', 'GHOST VELOCITY', 'GHOST ON MUTES', 'DRUM ROLL']
             rows += ['AUTO UNMUTED' if self.page == 'drum' and self.engine.auto_play
                      else 'UNMUTE' if self.engine.tracks[self.page].muted else 'MUTE']
             if self.page == 'drum':
@@ -113,7 +113,7 @@ class Menu:
             return rows
         if self.page == 'settings':
             return ['MIDI CHANNELS', 'PRESET BANKS', 'CLOCK SOURCE',
-                    'CV OUTPUT FROM', 'TEMPO', 'MIX', 'AUTO PLAY',
+                    'CV OUTPUT FROM', 'TEMPO', 'SWING', 'MIX', 'AUTO PLAY',
                     'SCREENSAVER', 'PLAY / STOP']
         if self.page == 'channels':
             return [NAMES[r] for r in ROLES]
@@ -214,6 +214,10 @@ class Menu:
                 return '%s %d' % (genre, patterns.DRUM_TEMPOS[genre] if self.editing else e.bpm)
             if self.page == 'drum' and row == 'GHOST NOTES':
                 return '%d%%' % e.ghost_percent
+            if self.page == 'drum' and row == 'GHOST VELOCITY':
+                return str(e.ghost_velocity)
+            if self.page == 'drum' and row == 'GHOST ON MUTES':
+                return 'ON' if e.ghost_on_muted else 'OFF'
         if self.page == 'channels':
             role = ROLES[self.index]
             channel = self.channel_candidate if self.editing else e.tracks[role].channel
@@ -240,6 +244,8 @@ class Menu:
                 return NAMES.get(e.cv_role, 'OFF')
             if row == 'TEMPO':
                 return '%d BPM' % e.bpm
+            if row == 'SWING':
+                return ('50%', '58%', '67%', '75%')[e.swing]
             if row == 'MIX':
                 return 'ON' if e.mix_enabled else 'OFF'
             if row == 'AUTO PLAY':
@@ -315,6 +321,14 @@ class Menu:
             e.set_ghost_percent(e.ghost_percent + delta * 5)
             if self.settings_changed:
                 self.settings_changed(now)
+        elif self.page == 'drum' and row == 'GHOST VELOCITY':
+            e.ghost_velocity = clamp(e.ghost_velocity + delta, 1, 127)
+            if self.settings_changed:
+                self.settings_changed(now)
+        elif self.page == 'drum' and row == 'GHOST ON MUTES':
+            e.ghost_on_muted = delta > 0
+            if self.settings_changed:
+                self.settings_changed(now)
         elif self.page == 'settings' and row == 'CLOCK SOURCE':
             current = self.clock_candidate or getattr(e, 'clock_source', 'INTERNAL')
             self.clock_candidate = CLOCK_SOURCES[(CLOCK_SOURCES.index(current) + delta) % len(CLOCK_SOURCES)]
@@ -323,6 +337,10 @@ class Menu:
             e.set_cv_role(sources[(sources.index(e.cv_role) + delta) % len(sources)])
         elif self.page == 'settings' and row == 'TEMPO':
             e.set_bpm(e.bpm + delta)
+        elif self.page == 'settings' and row == 'SWING':
+            e.swing = clamp(e.swing + delta, 0, 3)
+            if self.settings_changed:
+                self.settings_changed(now)
         elif self.page == 'settings' and row == 'MIX':
             e.mix_enabled = delta > 0
         elif self.page == 'settings' and row == 'AUTO PLAY':
@@ -393,7 +411,7 @@ class Menu:
                 self.show_notice('NEW PRESET!', now)
             elif row.startswith('PRESET '):
                 self.enter('preset:' + self.page)
-            elif row in ('LOOP LENGTH', 'DIRECTION', 'OCTAVE', '# of NOTES', 'CHORD SIZE', 'GENRE', 'GHOST NOTES'):
+            elif row in ('LOOP LENGTH', 'DIRECTION', 'OCTAVE', '# of NOTES', 'CHORD SIZE', 'GENRE', 'GHOST NOTES', 'GHOST VELOCITY', 'GHOST ON MUTES'):
                 self.editing = True
                 if row == 'GENRE':
                     self.genre_candidate = e.drum_genre

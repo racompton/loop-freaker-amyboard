@@ -134,13 +134,25 @@ class SequencerTests(unittest.TestCase):
         self.e.step = 173
         self.e.roll_remaining = 9
         self.e.break_remaining = 7
+        with patch.object(self.e, '_randomize_breakdown', wraps=self.e._randomize_breakdown) as change:
+            self.e.randomize_all()
+        change.assert_called_once()
         duration = self.e.break_duration_beats
-        self.e.randomize_all()
         self.assertEqual(0, self.e.roll_remaining)
         self.assertEqual(0, self.e.break_remaining)
         self.assertEqual(173 + self.e.drum_roll_beats * 4, self.e.roll_due_step)
         self.assertEqual(173 + (64 - duration) * 4, self.e.break_due_step)
-        self.assertEqual(duration, self.e.break_duration_beats)
+        self.assertTrue(2 <= duration <= 16)
+
+    def test_local_drum_randomize_resets_breakdown(self):
+        self.e.step = 32
+        self.e.break_remaining = 3
+        with patch.object(self.e, '_randomize_breakdown', wraps=self.e._randomize_breakdown) as change:
+            self.e.randomize_track('drum')
+        change.assert_called_once()
+        self.assertEqual(0, self.e.break_remaining)
+        self.assertEqual(32 + (64 - self.e.break_duration_beats) * 4,
+                         self.e.break_due_step)
 
     def test_instrument_randomize_changes_notes_preset_and_unmutes(self):
         choose = loop_random.choice
@@ -318,7 +330,28 @@ class SequencerTests(unittest.TestCase):
                 notes = [event for event in self.sink.events if event[0] == 'on' and event[1] == 10]
                 self.assertEqual(1 if step % 4 == 2 else 0, len(notes))
                 if notes:
-                    self.assertLessEqual(notes[0][3], 55)
+                    self.assertTrue(60 <= notes[0][3] <= 80)
+
+    def test_ghosts_may_use_muted_parts_only_when_enabled(self):
+        self.e.tracks['drum'].pattern = [None] * 16
+        self.e.tracks['drum'].muted = False
+        self.e.drum_muted = {part: True for part in self.e.drum_muted}
+        self.e.set_ghost_percent(100)
+        self.e.step = 2
+        self.e.advance()
+        self.assertFalse(any(event[0] == 'on' and event[1] == 10 for event in self.sink.events))
+        self.e.ghost_on_muted = True
+        self.e.ghost_velocity = 100
+        self.e.step = 6
+        self.e.advance()
+        hits = [event for event in self.sink.events if event[0] == 'on' and event[1] == 10]
+        self.assertEqual(1, len(hits))
+        self.assertTrue(90 <= hits[0][3] <= 110)
+        self.e.tracks['drum'].muted = True
+        self.e.step = 10
+        self.sink.events.clear()
+        self.e.advance()
+        self.assertFalse(any(event[0] == 'on' and event[1] == 10 for event in self.sink.events))
 
     def test_kick_break_ends_each_sixty_four_beat_cycle_with_fixed_duration(self):
         track = self.e.tracks['drum']
@@ -965,7 +998,7 @@ class MenuTests(unittest.TestCase):
     def test_settings_has_no_internal_sound_editor(self):
         self.m.enter('settings')
         self.assertEqual(['MIDI CHANNELS', 'PRESET BANKS',
-                          'CLOCK SOURCE', 'CV OUTPUT FROM', 'TEMPO', 'MIX',
+                          'CLOCK SOURCE', 'CV OUTPUT FROM', 'TEMPO', 'SWING', 'MIX',
                           'AUTO PLAY', 'SCREENSAVER', 'PLAY / STOP'], self.m.rows())
 
     def test_ghost_notes_edit_is_in_drums_and_requests_persistence(self):
@@ -979,6 +1012,30 @@ class MenuTests(unittest.TestCase):
         self.assertEqual('45%', self.m.selected_value())
         self.assertEqual([2], changed)
         self.assertFalse(self.e.tracks['drum'].muted)
+
+    def test_ghost_velocity_and_muted_part_controls_are_editable(self):
+        changed = []
+        self.m.settings_changed = changed.append
+        self.m.enter('drum')
+        self.m.index = self.m.rows().index('GHOST VELOCITY')
+        self.m.click(1)
+        self.m.handle(2, delta=15)
+        self.assertEqual('85', self.m.selected_value())
+        self.m.click(3)
+        self.m.index = self.m.rows().index('GHOST ON MUTES')
+        self.m.click(4)
+        self.m.handle(5, delta=1)
+        self.assertEqual('ON', self.m.selected_value())
+        self.assertEqual([2, 5], changed)
+
+    def test_swing_menu_has_straight_default_and_four_levels(self):
+        self.m.enter('settings')
+        self.m.index = self.m.rows().index('SWING')
+        self.assertEqual('50%', self.m.selected_value())
+        self.m.click(1)
+        for label in ('58%', '67%', '75%'):
+            self.m.handle(2, delta=1)
+            self.assertEqual(label, self.m.selected_value())
 
     def test_cv_output_from_selects_the_mirrored_instrument(self):
         self.m.enter('settings')
@@ -1037,7 +1094,7 @@ class MenuTests(unittest.TestCase):
             hits = self.e._with_ghost_note([], step)
             self.assertEqual(bool(hits), step % 4 == 2)
             if hits:
-                self.assertTrue(24 <= hits[0][1] <= 55)
+                self.assertTrue(60 <= hits[0][1] <= 80)
         self.e.set_ghost_percent(0)
         self.assertEqual([], self.e._with_ghost_note([], 2))
 

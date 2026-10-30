@@ -83,6 +83,9 @@ class Engine:
         self.cv_gate = 5
         self.drum_genre = 'HOUSE'
         self.ghost_percent = 35
+        self.ghost_velocity = 70
+        self.ghost_on_muted = False
+        self.swing = 0  # delayed 24-PPQN pulses on alternate 16th steps
         self.clock_source = 'INTERNAL'
         self.drum_roll_beats = 128
         self.break_duration_beats = random.randint(2, 16)
@@ -505,6 +508,7 @@ class Engine:
         length = len(self.tracks[role].pattern)
         if role == 'drum':
             self.tracks[role].pattern = patterns.generate_drums(self.drum_genre, length)
+            self._randomize_breakdown()
         else:
             new, roots = self._extra_notes(role, length)
             self.tracks[role].pattern = new
@@ -558,14 +562,13 @@ class Engine:
         for role in ROLES:
             self.silence(role)
         # Main RANDOMIZE starts a fresh countdown for both drum effects.
-        # Keep the set's chosen breakdown duration unchanged.
         self.roll_remaining = 0
         self.break_remaining = 0
         self.roll_due_step = (self.step + self.drum_roll_beats * 4
                               if self.drum_roll_beats else None)
         if self.auto_play:
             self._choose_auto_pre_roll_parts()
-        self.break_due_step = self.step + (DRUM_BREAK_BEATS - self.break_duration_beats) * 4
+        self._randomize_breakdown()
         self.scale_name = random.choice(patterns.camelot_compatible_keys(self.scale_name))
         self.scale = patterns.SCALE_PRESETS[self.scale_name][:]
         self.generate_all()
@@ -1053,13 +1056,19 @@ class Engine:
         sounding = {note for note, _ in notes}
         candidates = [note for note, part in ((38, 'snare'), (37, 'rimshot'),
                       (39, 'clap'), (41, 'toms'), (45, 'toms'), (42, 'hats'))
-                      if not self.drum_muted[part] and note not in sounding]
+                      if (self.ghost_on_muted or not self.drum_muted[part]) and note not in sounding]
         if candidates:
-            notes.append((random.choice(candidates), random.randint(24, 55)))
+            notes.append((random.choice(candidates), random.randint(
+                max(1, self.ghost_velocity - 10), min(127, self.ghost_velocity + 10))))
         return notes
 
     def set_ghost_percent(self, value):
         self.ghost_percent = clamp(value, 0, 100)
+
+    def _randomize_breakdown(self):
+        self.break_duration_beats = random.randint(2, 16)
+        self.break_remaining = 0
+        self.break_due_step = self.step + (DRUM_BREAK_BEATS - self.break_duration_beats) * 4
 
     def _available_drum_notes(self, sounding):
         return [note for note, part in ((38, 'snare'), (37, 'rimshot'),

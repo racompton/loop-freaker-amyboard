@@ -72,6 +72,9 @@ class App:
         self.engine = Engine(self.sink, generate=False,
                              program_counts=self.settings.program_counts)
         self.engine.ghost_percent = self.settings.ghost_percent
+        self.engine.ghost_velocity = self.settings.ghost_velocity
+        self.engine.ghost_on_muted = self.settings.ghost_on_muted
+        self.engine.swing = self.settings.swing
         self.engine.clock_source = self.settings.clock_source
         self.engine.preset_preferences = PresetPreferences(ranges=self.engine.program_counts)
         # Make the first set exactly as RANDOMIZE would, before MIDI Start.
@@ -104,6 +107,8 @@ class App:
         self.last_frame = now
         self.tempo = self.engine.bpm
         self.last_pulse = -1
+        self.last_note_step = -1
+        self.drum_release_pulse = None
         self.origin = None
         self.was_playing = False
         self.last_error = None
@@ -130,6 +135,9 @@ class App:
 
     def _settings_changed(self, now):
         self.settings.ghost_percent = self.engine.ghost_percent
+        self.settings.ghost_velocity = self.engine.ghost_velocity
+        self.settings.ghost_on_muted = self.engine.ghost_on_muted
+        self.settings.swing = self.engine.swing
         self.settings.program_counts = {role: tuple(counts) for role, counts in
                                         self.engine.program_counts.items()}
         self.settings.clock_source = self.engine.clock_source
@@ -153,6 +161,8 @@ class App:
         self.last_clock_us = None
         self.was_playing = False
         self.last_pulse = -1
+        self.last_note_step = -1
+        self.drum_release_pulse = None
         self.midi_beat_us = None
         if source == 'INTERNAL' and self.running:
             self.engine.start()
@@ -166,6 +176,8 @@ class App:
             self.engine.start()
             self.was_playing = False
             self.last_pulse = -1
+            self.last_note_step = -1
+            self.drum_release_pulse = None
         elif message[0] == 0xFC:
             self.engine.stop()
             self.was_playing = False
@@ -206,6 +218,8 @@ class App:
             if not self.was_playing:
                 self.origin = tick
                 self.last_pulse = -1
+                self.last_note_step = -1
+                self.drum_release_pulse = None
                 self.was_playing = True
             pulse = (tick - self.origin) // max(1, sequencer.PPQ // 24)
             self._process_pulse(pulse)
@@ -226,9 +240,15 @@ class App:
             self.midi_beat_us = now_us
         self.sink.clock()
         step = pulse // 6
-        if step != self.last_pulse // 6:
+        if self.drum_release_pulse is not None and pulse >= self.drum_release_pulse:
+            self.engine.release_drums()
+            self.drum_release_pulse = None
+        ready = step % 2 == 0 or pulse % 6 >= self.engine.swing
+        if ready and step > self.last_note_step:
             self.engine.step = step
             self.engine.advance()
+            self.last_note_step = step
+            self.drum_release_pulse = pulse + 3
             if step % 4 == 0 and self.menu.bam_at is None:
                 self.menu.status_dirty = True
             if self.engine.clock_source.startswith('CV'):
@@ -241,8 +261,6 @@ class App:
                 sequencer.tempo(self.tempo)
                 if self.menu.page == 'main' and self.menu.bam_at is None:
                     self.menu.dirty = True
-        if pulse % 6 >= 3:
-            self.engine.release_drums()
         self.last_pulse = pulse
         self.last_clock_us = self.micros()
 
@@ -270,6 +288,8 @@ class App:
                 if not self.engine.playing:
                     self.engine.start()
                     self.last_pulse = -1
+                    self.last_note_step = -1
+                    self.drum_release_pulse = None
                     self.cv_beat = 0
                     self.cv_pulse = 0
             if (self.cv_edge_us is not None and

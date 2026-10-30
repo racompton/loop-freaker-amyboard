@@ -106,6 +106,8 @@ DRUMS
   LOOP LENGTH
   GENRE          HOUSE / TECHNO / BREAKS / ELECTRO / DRUM'N'BASS
   GHOST NOTES    0–100% in 5% steps; default 35%
+  GHOST VELOCITY 1–127; default 70, varied by up to ±10
+  GHOST ON MUTES OFF / ON; default OFF
   DRUM ROLL
     TRIGGER NOW
     AUTO EVERY    OFF or 32–1024 beats in steps of 32; default 128
@@ -130,6 +132,7 @@ SETTINGS
   CLOCK SOURCE     INTERNAL / MIDI IN / CV1 IN / CV2 IN
   CV OUTPUT FROM   OFF / SYNTH / BASS / CHORD / DRUMS
   TEMPO
+  SWING            50% / 58% / 67% / 75%; default 50% (straight)
   MIX             ON / OFF (default ON)
   AUTO PLAY       OFF / ON (default OFF)
   SCREENSAVER    OFF / ON
@@ -137,12 +140,22 @@ SETTINGS
 ```
 
 GHOST NOTES controls extra live drum hits: on the eighth-note offbeat, each
-eligible step has the configured chance of adding one 24–55 velocity snare,
-rimshot, clap, tom, or hat. Muted parts and notes already sounding are skipped.
+eligible step has the configured chance of adding one snare, rimshot, clap,
+tom, or hat. GHOST VELOCITY sets the center of the random velocity range; each
+hit varies by up to 10 in either direction, bounded by 1–127. GHOST ON MUTES
+allows ghosts to use individually muted parts when ON; OFF respects their mutes.
+Muting the whole DRUMS track always suppresses its ghosts, and notes already
+sounding on that step are skipped.
 At 0%, these live extras stop; quiet notes already embedded in a generated drum
-pattern remain. The ghost setting, clock source, and preset-bank layout are
+pattern remain. Ghost settings, swing, clock source, and preset-bank layout are
 stored in `/user/looper_settings.json` and survive reboot. This file is separate
 from saved sets and is not included in releases.
+
+SWING delays every other sixteenth note across all four tracks. The values
+show the first note's share of each two-step pair: 50% is straight, and 75%
+is the strongest swing. The four levels follow the existing 24-PPQ clock
+resolution; outgoing MIDI clock stays straight. External devices need their own
+swing setting if their sequencers should swing too.
 
 INTERNAL uses the looper tempo. MIDI IN follows incoming MIDI realtime F8
 clock and FA/FC Start/Stop (24 pulses per beat). CV1 IN or CV2 IN treats each
@@ -168,7 +181,8 @@ original, random mutes can produce a quiet pattern; unmute tracks/parts as desir
 It also shows a 640 ms static BAM! starburst. The OLED refreshes once for the
 picture and once to restore the menu.
 Main RANDOMIZE also restarts the automatic drum-roll and 64-beat kick-breakdown
-countdowns from the current beat while retaining the chosen breakdown duration.
+countdowns and chooses a new 2–16 beat breakdown duration. DRUMS RANDOMIZE and
+RANDOM NOTES also choose a new breakdown duration and restart its countdown.
 The new key is limited to its current Camelot position, one position clockwise
 or counterclockwise on the same major/minor ring, or the relative major/minor
 at the same number. For example, C Major (8B) can move to C Major, F Major,
@@ -296,7 +310,7 @@ time with the other tracks. Chords are generated before bass so bass uses the
 new progression rather than stale roots. Consecutive identical drum hits retrigger;
 identical melodic/chord steps sustain, as in the desktop script.
 
-DRUMS adds occasional ghost hits at velocities 24–55 on eighth-note offbeats
+DRUMS adds occasional ghost hits at the configured velocity on eighth-note offbeats
 during ordinary playback. A 2–16 beat kick break is chosen once for the set;
 it ends at beat 64, repeats at the end of every 64-beat cycle with the same
 duration, removes the kick and adds random other drum hits, then resumes the

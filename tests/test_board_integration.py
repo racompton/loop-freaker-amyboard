@@ -297,6 +297,9 @@ class BoardTests(unittest.TestCase):
 
     def test_device_settings_survive_reboot(self):
         self.app.engine.set_ghost_percent(75)
+        self.app.engine.ghost_velocity = 85
+        self.app.engine.ghost_on_muted = True
+        self.app.engine.swing = 2
         self.app.engine.set_program_counts('lead', (20, 30))
         self.app._set_clock_source('CV2 IN', 0)
         self.app._settings_changed(0)
@@ -305,9 +308,26 @@ class BoardTests(unittest.TestCase):
         self.assertIsNone(self.app.settings_job)
         loaded = self.module.DeviceSettings()
         self.assertEqual(75, loaded.ghost_percent)
+        self.assertEqual(85, loaded.ghost_velocity)
+        self.assertTrue(loaded.ghost_on_muted)
+        self.assertEqual(2, loaded.swing)
         self.assertEqual('CV2 IN', loaded.clock_source)
         self.assertEqual((20, 30), loaded.program_counts['lead'])
         self.assertEqual([], self.amy_messages)
+
+    def test_swing_delays_alternate_steps_without_delaying_midi_clock(self):
+        self.app.engine.swing = 2
+        advances = []
+        original = self.app.engine.advance
+        def record():
+            advances.append((self.app.engine.step, self.midi.count(bytes((0xF8,)))))
+            original()
+        self.app.engine.advance = record
+        self.midi.clear()
+        for pulse in range(24):
+            self.app._tick(pulse * 2)
+        self.assertEqual([(0, 1), (1, 9), (2, 13), (3, 21)], advances)
+        self.assertEqual(24, self.midi.count(bytes((0xF8,))))
 
     def test_amyboard_uses_direct_trs_uart_for_notes_and_clock(self):
         writes = []
