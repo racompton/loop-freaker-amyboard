@@ -10,7 +10,7 @@ if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', VERSION):
 
 FILES = (
     'loop_random.py', 'loop_patterns.py', 'loop_engine.py', 'loop_sets.py',
-    'loop_preset_preferences.py', 'loop_ui.py', 'loop_hardware.py',
+    'loop_preset_preferences.py', 'loop_settings.py', 'loop_ui.py', 'loop_hardware.py',
     'sequencer_app.py', 'sketch.py', 'README.md', 'SEQUENCER.md', 'LICENSE',
     'VERSION', 'assets/looper-preview.png', 'assets/looper-bam.png',
     'assets/looper-load.png', 'assets/looper-drum-roll.png',

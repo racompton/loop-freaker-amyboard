@@ -4,11 +4,16 @@ import struct
 import amyboard
 import tulip
 import sequencer
+try:
+    import midi
+except ImportError:
+    midi = None
 from loop_engine import Engine
 from loop_ui import Controls, Menu, NoteGalaxy
 from loop_hardware import Outputs
 from loop_sets import Sets
 from loop_preset_preferences import PresetPreferences
+from loop_settings import DeviceSettings, CLOCK_SOURCES
 
 _app = None
 
@@ -62,9 +67,13 @@ class App:
     def __init__(self):
         self.running = False
         self.sequence = None
+        self.settings = DeviceSettings()
         self.sink = Outputs()
-        self.engine = Engine(self.sink, generate=False)
-        self.engine.preset_preferences = PresetPreferences()
+        self.engine = Engine(self.sink, generate=False,
+                             program_counts=self.settings.program_counts)
+        self.engine.ghost_percent = self.settings.ghost_percent
+        self.engine.clock_source = self.settings.clock_source
+        self.engine.preset_preferences = PresetPreferences(ranges=self.engine.program_counts)
         # Make the first set exactly as RANDOMIZE would, before MIDI Start.
         self.engine.randomize_all()
         if amyboard.display is None:
@@ -78,7 +87,11 @@ class App:
         self.set_store = Sets()
         self.menu = Menu(self.engine, now, time.ticks_diff, self.set_store)
         self.menu.io_request = self._queue_io
+        self.menu.settings_changed = self._settings_changed
+        self.menu.clock_changed = self._set_clock_source
         self.io_job = None
+        self.settings_job = None
+        self.settings_dirty_at = None
         self.auto_job = None
         self.last_clock_us = None
         self.micros = time.ticks_us if hasattr(time, 'ticks_us') else lambda: time.ticks_ms() * 1000
@@ -94,6 +107,14 @@ class App:
         self.origin = None
         self.was_playing = False
         self.last_error = None
+        self.cv_high = False
+        self.cv_edge_us = None
+        self.cv_period_us = 60000000 // self.engine.bpm
+        self.cv_next_us = None
+        self.cv_pulse = 0
+        self.cv_beat = -1
+        self.midi_callback_added = False
+        self.midi_beat_us = None
 
     def start(self):
         self.running = True
@@ -104,21 +125,79 @@ class App:
         self.sequence = sequencer.TulipSequence(96, self._tick)
         if hasattr(tulip, 'sequencer_start'):
             tulip.sequencer_start()
-        self.engine.start()
+        self._configure_clock(self.engine.clock_source)
         tulip.defer(self._ui, None, 20)
+
+    def _settings_changed(self, now):
+        self.settings.ghost_percent = self.engine.ghost_percent
+        self.settings.program_counts = {role: tuple(counts) for role, counts in
+                                        self.engine.program_counts.items()}
+        self.settings.clock_source = self.engine.clock_source
+        self.settings_dirty_at = now
+
+    def _configure_clock(self, source):
+        if self.engine.playing:
+            self.engine.stop()
+        if self.midi_callback_added and midi is not None:
+            midi.remove_callback(self._midi_input)
+            self.midi_callback_added = False
+        if hasattr(tulip, 'external_midi_sync'):
+            tulip.external_midi_sync(source == 'MIDI IN')
+        if source == 'MIDI IN' and midi is not None:
+            midi.add_callback(self._midi_input)
+            self.midi_callback_added = True
+        self.cv_edge_us = None
+        self.cv_next_us = None
+        self.cv_high = False
+        self.cv_beat = -1
+        self.last_clock_us = None
+        self.was_playing = False
+        self.last_pulse = -1
+        self.midi_beat_us = None
+        if source == 'INTERNAL' and self.running:
+            self.engine.start()
+        if source.startswith('CV') and self.running:
+            tulip.defer(self._cv_tick, None, 2)
+
+    def _midi_input(self, message):
+        if not self.running or self.engine.clock_source != 'MIDI IN' or not message:
+            return
+        if message[0] == 0xFA:
+            self.engine.start()
+            self.was_playing = False
+            self.last_pulse = -1
+        elif message[0] == 0xFC:
+            self.engine.stop()
+            self.was_playing = False
+
+    def _set_clock_source(self, source, now):
+        if source not in CLOCK_SOURCES:
+            raise ValueError('unknown clock source')
+        if source.startswith('CV') and not hasattr(amyboard, 'cv_in'):
+            self.menu.show_notice('CV IN UNAVAILABLE', now)
+            return
+        if source == self.engine.clock_source:
+            return
+        self.engine.clock_source = source
+        self._configure_clock(source)
+        self._settings_changed(now)
+        self.menu.show_notice(source, now)
 
     def _clock_slack(self, reserve_us):
         """Keep UI work away from the next Python note callback."""
         if not self.engine.playing:
             return True
         if self.last_clock_us is None:
-            return False
-        period_us = 60000000 // (self.engine.bpm * 24)
+            return self.engine.clock_source.startswith('CV')
+        period_us = (self.cv_period_us // 24 if self.engine.clock_source.startswith('CV')
+                     else 60000000 // (self.engine.bpm * 24))
         age = time.ticks_diff(self.micros(), self.last_clock_us)
         return 0 <= age < max(0, period_us - reserve_us)
 
     def _tick(self, tick):
         if not self.running:
+            return
+        if self.engine.clock_source.startswith('CV'):
             return
         try:
             if not self.engine.playing:
@@ -129,24 +208,84 @@ class App:
                 self.last_pulse = -1
                 self.was_playing = True
             pulse = (tick - self.origin) // max(1, sequencer.PPQ // 24)
-            if pulse <= self.last_pulse:
-                return
-            self.sink.clock()
-            step = pulse // 6
-            if step != self.last_pulse // 6:
-                self.engine.step = step
-                self.engine.advance()
-                if step % 4 == 0 and self.menu.bam_at is None:
-                    self.menu.status_dirty = True
-                if self.engine.bpm != self.tempo:
-                    self.tempo = self.engine.bpm
-                    sequencer.tempo(self.tempo)
-                    if self.menu.page == 'main' and self.menu.bam_at is None:
+            self._process_pulse(pulse)
+        except Exception as exc:
+            self.fail(exc)
+
+    def _process_pulse(self, pulse):
+        if pulse <= self.last_pulse:
+            return
+        now_us = self.micros()
+        if self.engine.clock_source == 'MIDI IN' and pulse % 24 == 0:
+            if self.midi_beat_us is not None:
+                period = time.ticks_diff(now_us, self.midi_beat_us)
+                if 250000 <= period <= 2000000:
+                    self.engine.set_bpm(round(60000000 / period))
+                    if self.menu.page == 'main':
                         self.menu.dirty = True
-            if pulse % 6 >= 3:
-                self.engine.release_drums()
-            self.last_pulse = pulse
-            self.last_clock_us = self.micros()
+            self.midi_beat_us = now_us
+        self.sink.clock()
+        step = pulse // 6
+        if step != self.last_pulse // 6:
+            self.engine.step = step
+            self.engine.advance()
+            if step % 4 == 0 and self.menu.bam_at is None:
+                self.menu.status_dirty = True
+            if self.engine.clock_source.startswith('CV'):
+                old_bpm = self.engine.bpm
+                self.engine.set_bpm(round(60000000 / self.cv_period_us))
+                if old_bpm != self.engine.bpm and self.menu.page == 'main':
+                    self.menu.dirty = True
+            if self.engine.bpm != self.tempo and self.engine.clock_source == 'INTERNAL':
+                self.tempo = self.engine.bpm
+                sequencer.tempo(self.tempo)
+                if self.menu.page == 'main' and self.menu.bam_at is None:
+                    self.menu.dirty = True
+        if pulse % 6 >= 3:
+            self.engine.release_drums()
+        self.last_pulse = pulse
+        self.last_clock_us = self.micros()
+
+    def _cv_tick(self, _):
+        if not self.running or not self.engine.clock_source.startswith('CV'):
+            return
+        try:
+            now = self.micros()
+            channel = 0 if self.engine.clock_source == 'CV1 IN' else 1
+            volts = amyboard.cv_in(channel)
+            rising = volts >= 1.5 and not self.cv_high
+            if volts <= 0.8:
+                self.cv_high = False
+            elif volts >= 1.5:
+                self.cv_high = True
+            if rising:
+                if self.cv_edge_us is not None:
+                    period = time.ticks_diff(now, self.cv_edge_us)
+                    if 250000 <= period <= 2000000:
+                        self.cv_period_us = period
+                self.cv_edge_us = now
+                self.cv_beat += 1
+                self.cv_pulse = self.cv_beat * 24
+                self.cv_next_us = now
+                if not self.engine.playing:
+                    self.engine.start()
+                    self.last_pulse = -1
+                    self.cv_beat = 0
+                    self.cv_pulse = 0
+            if (self.cv_edge_us is not None and
+                    time.ticks_diff(now, self.cv_edge_us) > self.cv_period_us * 2):
+                if self.engine.playing:
+                    self.engine.stop()
+                self.cv_edge_us = None
+                self.cv_next_us = None
+            if (self.engine.playing and self.cv_next_us is not None and
+                    time.ticks_diff(now, self.cv_next_us) >= 0):
+                if self.cv_pulse <= self.cv_beat * 24 + 23:
+                    self._process_pulse(self.cv_pulse)
+                    self.cv_pulse += 1
+                    self.cv_next_us = time.ticks_add(
+                        self.cv_next_us, self.cv_period_us // 24)
+            tulip.defer(self._cv_tick, None, 2)
         except Exception as exc:
             self.fail(exc)
 
@@ -186,10 +325,11 @@ class App:
         job = self.io_job
         if job is None:
             return
-        if self.engine.playing:
-            if self.last_clock_us is None:
+        if self.engine.playing and self.last_clock_us is not None:
+            if not self._clock_slack(8000):
                 return
-            period_us = 60000000 // (self.engine.bpm * 24)
+            period_us = (self.cv_period_us // 24 if self.engine.clock_source.startswith('CV')
+                         else 60000000 // (self.engine.bpm * 24))
             age = time.ticks_diff(self.micros(), self.last_clock_us)
             if age < 0 or age > max(1500, period_us - 8000):
                 return
@@ -231,6 +371,28 @@ class App:
             except Exception as exc:
                 print('Loop storage failed:', exc)
                 self.menu.show_notice(job['kind'].upper() + ' FAILED', now)
+
+    def _service_settings(self, now):
+        if self.settings_dirty_at is None and self.settings_job is None:
+            return
+        if self.io_job is not None or not self._clock_slack(12000):
+            return
+        if self.settings_job is None:
+            if time.ticks_diff(now, self.settings_dirty_at) < 800:
+                return
+            self.settings_job = (self.settings_dirty_at, self.settings.save_steps())
+        stamp, steps = self.settings_job
+        try:
+            next(steps)
+        except StopIteration:
+            self.settings_job = None
+            if self.settings_dirty_at == stamp:
+                self.settings_dirty_at = None
+        except Exception as exc:
+            self.settings_job = None
+            self.settings_dirty_at = None
+            print('Looper settings save failed:', exc)
+            self.menu.show_notice('SETTINGS FAILED', now)
 
     def _deliver_input(self, now, delta, click, held, activity):
         self.menu.handle(now, delta, click, held, activity)
@@ -284,10 +446,11 @@ class App:
             wake = asleep and (pressed or position != self.controls.position)
             delta, click, held, activity = self.controls.poll(now, position, pressed, consume=wake)
             self._deliver_input(now, delta, click, held, activity or wake)
-            if self.engine.bpm != self.tempo:
+            if self.engine.bpm != self.tempo and self.engine.clock_source == 'INTERNAL':
                 self.tempo = self.engine.bpm
                 sequencer.tempo(self.tempo)
             self._service_io(now)
+            self._service_settings(now)
             self._service_auto()
             # Coalesce fast encoder turns. Never build another OLED frame while
             # the previous background I2C transfer is still on the bus.
@@ -319,6 +482,11 @@ class App:
 
     def stop(self):
         self.running = False
+        if self.midi_callback_added and midi is not None:
+            midi.remove_callback(self._midi_input)
+            self.midi_callback_added = False
+        if hasattr(tulip, 'external_midi_sync'):
+            tulip.external_midi_sync(False)
         if self.sequence is not None:
             self.sequence.clear()
             self.sequence = None

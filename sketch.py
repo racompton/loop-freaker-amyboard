@@ -66,7 +66,7 @@ if not _SAFE_MODE:
                 sys.modules["sequencer_app"].stop()
             except Exception:
                 pass
-            for _module in ("sequencer_app", "loop_sets", "loop_preset_preferences",
+            for _module in ("sequencer_app", "loop_sets", "loop_settings", "loop_preset_preferences",
                             "loop_ui", "loop_engine",
                             "loop_patterns", "loop_random", "loop_hardware",
                             "loop_amy_settings", "menu"):

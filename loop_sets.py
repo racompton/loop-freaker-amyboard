@@ -73,7 +73,7 @@ def validate_set_steps(data):
         if not isinstance(track, dict):
             raise ValueError('invalid track')
         bounds = {'channel': (1, 16), 'octave': (-5, 5),
-                  'transpose': (-48, 48), 'bank': (0, 3),
+                  'transpose': (-48, 48), 'bank': (0, 15),
                   'program': (0, 127)}
         for field, (low, high) in bounds.items():
             if not _integer(track.get(field), low, high):

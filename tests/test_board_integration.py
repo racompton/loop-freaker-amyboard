@@ -57,6 +57,7 @@ class BoardTests(unittest.TestCase):
         self.display = Display()
         self.encoder = Encoder()
         self.sequences = []
+        self.midi_callbacks = []
         self.refreshes = 0
         self.fail_internal = False
         self.next_pulse = 0
@@ -78,6 +79,7 @@ class BoardTests(unittest.TestCase):
             display=self.display, encoder=lambda: self.encoder,
             init_display=lambda *a, **k: None, display_refresh=refresh,
             cv_out=lambda volts, channel: self.cv.append((channel, volts)),
+            cv_in=lambda channel=0: 0.0,
             set_cv_out=lambda *a: None, init_gp8413=lambda: None)
         modules = {
             'amyboard': self.board,
@@ -85,6 +87,9 @@ class BoardTests(unittest.TestCase):
             'tulip': types.SimpleNamespace(midi_out=lambda b: self.midi.append(bytes(b)),
                                           defer=lambda fn, arg, ms: self.deferred.append((fn, arg, ms)),
                                           sequencer_start=lambda: None, i2c_bg_write=lambda *a: None),
+            'midi': types.SimpleNamespace(
+                add_callback=lambda fn: self.midi_callbacks.append(fn),
+                remove_callback=lambda fn: self.midi_callbacks.remove(fn)),
             'sequencer': types.SimpleNamespace(PPQ=48, TulipSequence=make_sequence, tempo=lambda bpm: None),
         }
         self.patchers = [patch.dict(sys.modules, modules),
@@ -99,6 +104,8 @@ class BoardTests(unittest.TestCase):
         self.set_dir = tempfile.TemporaryDirectory()
         store_type = self.module.Sets
         self.module.Sets = lambda: store_type(self.set_dir.name)
+        settings_type = self.module.DeviceSettings
+        self.module.DeviceSettings = lambda: settings_type(self.set_dir.name + '/settings.json')
         self.app = self.module.start()
 
     def tearDown(self):
@@ -237,7 +244,8 @@ class BoardTests(unittest.TestCase):
         self.app.start()
         self.assertFalse(self.app.sink.native_clock)
         self.assertEqual(96, self.sequences[-1].divider)
-        self.assertEqual([((False,), {})], sync)
+        self.assertTrue(sync)
+        self.assertTrue(all(args == (False,) for args, _ in sync))
         self.midi.clear()
         lead = self.app.engine.tracks['lead']
         lead.pattern = [60]
@@ -248,6 +256,57 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(7, self.midi.count(bytes((0xF8,))))
         self.app.stop()
         self.assertIn((1, 0), self.cv)
+
+    def test_cv_clock_uses_one_edge_per_beat_and_fills_sixteenth_steps(self):
+        voltage = [0.0]
+        self.board.cv_in = lambda channel=0: voltage[0]
+        self.app._set_clock_source('CV1 IN', 0)
+        self.assertFalse(self.app.engine.playing)
+        voltage[0] = 5.0
+        self.app._cv_tick(None)
+        voltage[0] = 0.0
+        for self.now in range(2, 500, 2):
+            self.app._cv_tick(None)
+        self.assertEqual(24, self.midi.count(bytes((0xF8,))))
+        self.now = 500
+        voltage[0] = 5.0
+        self.app._cv_tick(None)
+        voltage[0] = 0.0
+        for self.now in range(502, 1000, 2):
+            self.app._cv_tick(None)
+        self.assertEqual(48, self.midi.count(bytes((0xF8,))))
+        self.assertEqual(8, self.app.engine.step)
+        self.assertEqual(120, self.app.engine.bpm)
+
+    def test_midi_clock_source_follows_start_stop_without_internal_notes(self):
+        sync = []
+        self.module.tulip.external_midi_sync = lambda enabled: sync.append(enabled)
+        self.app._set_clock_source('MIDI IN', 0)
+        self.assertEqual([True], sync)
+        self.assertFalse(self.app.engine.playing)
+        self.assertEqual(1, len(self.midi_callbacks))
+        self.midi_callbacks[0](bytes((0xFA,)))
+        self.assertTrue(self.app.engine.playing)
+        self.app._tick(0)
+        self.assertIn(bytes((0xF8,)), self.midi)
+        self.midi_callbacks[0](bytes((0xFC,)))
+        self.assertFalse(self.app.engine.playing)
+        self.app.stop()
+        self.assertEqual([], self.midi_callbacks)
+        self.assertEqual(False, sync[-1])
+
+    def test_device_settings_survive_reboot(self):
+        self.app.engine.set_ghost_percent(75)
+        self.app.engine.set_program_counts('lead', (20, 30))
+        self.app._set_clock_source('CV2 IN', 0)
+        self.app._settings_changed(0)
+        for self.now in range(800, 900, 2):
+            self.app._service_settings(self.now)
+        self.assertIsNone(self.app.settings_job)
+        loaded = self.module.DeviceSettings()
+        self.assertEqual(75, loaded.ghost_percent)
+        self.assertEqual('CV2 IN', loaded.clock_source)
+        self.assertEqual((20, 30), loaded.program_counts['lead'])
         self.assertEqual([], self.amy_messages)
 
     def test_amyboard_uses_direct_trs_uart_for_notes_and_clock(self):

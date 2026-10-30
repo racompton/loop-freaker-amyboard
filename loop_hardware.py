@@ -2,7 +2,7 @@
 import time
 import amyboard
 import tulip
-from loop_preset_preferences import preset_number
+from loop_preset_preferences import preset_number, PROGRAM_COUNTS
 
 
 class Outputs:
@@ -55,7 +55,7 @@ class Outputs:
 
     def preset(self, track):
         channel = track.channel - 1
-        if track.role == 'chords':
+        if track.role == 'chords' and track.program_counts == PROGRAM_COUNTS['chords']:
             # The original minilogue displays 1–200 but accepts PC 0–99.
             # CC0 is always 0; CC32 selects either hundred.
             position = preset_number('chords', track.bank, track.program) - 1

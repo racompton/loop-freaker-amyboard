@@ -35,6 +35,7 @@ loop_patterns.py        original musical generators
 loop_engine.py          note, channel, mute and CV logic
 loop_sets.py            persistent named loop sets
 loop_preset_preferences.py  persistent channel-specific MIDI preset choices
+loop_settings.py        persistent device-wide clock, ghost, bank settings
 loop_ui.py              encoder gestures, menus, note galaxy
 loop_hardware.py        MIDI and CV output
 sequencer_app.py        firmware callbacks and application lifetime
@@ -65,9 +66,10 @@ For code updates, reset after uploading all modules, or call
 
 Rotate to select a row. Click to run an action or enter value editing; an asterisk
 marks editing. Rotate to change the value, then click to finish. Hold for 650 ms
-to go up one menu level, including when editing. Channel changes take effect
-immediately; channels already used by another track are rejected to prevent
-program changes and note-offs interfering with that track. Clicks take effect
+to go up one menu level, including when editing. While editing a MIDI channel,
+occupied channels display `IN USE` but can be scrolled past; clicking one is
+rejected to prevent program changes and note-offs interfering with that track.
+Clicks take effect
 as soon as the button is released; a double-click acts as two ordinary clicks.
 
 ```text
@@ -120,6 +122,12 @@ LOAD
 SETTINGS
   MIDI CHANNELS
     SYNTH / BASS / CHORD / DRUMS
+  PRESET BANKS
+    SYNTH / BASS / CHORD / DRUMS
+      BANK COUNT       1–16
+      BANK N PRESETS   1–128 per bank
+  GHOST NOTES      0–100% in 5% steps; default 35%
+  CLOCK SOURCE     INTERNAL / MIDI IN / CV1 IN / CV2 IN
   CV SOURCE       OFF / SYNTH / BASS / CHORD / DRUMS
   TEMPO
   MIX             ON / OFF (default ON)
@@ -127,6 +135,30 @@ SETTINGS
   SCREENSAVER    OFF / ON
   PLAY / STOP
 ```
+
+GHOST NOTES controls extra live drum hits: on the eighth-note offbeat, each
+eligible step has the configured chance of adding one 24–55 velocity snare,
+rimshot, clap, tom, or hat. Muted parts and notes already sounding are skipped.
+At 0%, these live extras stop; quiet notes already embedded in a generated drum
+pattern remain. The ghost setting, clock source, and preset-bank layout are
+stored in `/user/looper_settings.json` and survive reboot. This file is separate
+from saved sets and is not included in releases.
+
+INTERNAL uses the looper tempo. MIDI IN follows incoming MIDI realtime F8
+clock and FA/FC Start/Stop (24 pulses per beat). CV1 IN or CV2 IN treats each
+rising pulse above 1.5 V as one quarter-note beat and schedules 16th-note
+steps between pulses. The input must fall below 0.8 V to rearm. CV playback
+waits for the first pulse; if the clock stops for two beats, the looper stops
+and waits for another rising pulse. External clock tempo takes precedence over
+the TEMPO and genre targets while clocked. MIDI and CV clock paths continue to
+send clock and notes to the physical TRS MIDI OUT jack.
+
+PRESET BANKS configures how many MIDI banks and programs per bank each track
+can select from. Custom ranges constrain both SELECT PRESET and random preset
+choice; an active preset outside a reduced range is moved into the valid range.
+CHORD's factory default remains the Minilogue's continuous P1–P200 mapping.
+When CHORD uses custom ranges, it sends ordinary bank-select MSB plus program
+change instead.
 
 Main RANDOMIZE matches Enter: it chooses a new scale, regenerates all four
 patterns, randomizes all four presets, randomizes SYNTH/BASS/CHORD mutes and

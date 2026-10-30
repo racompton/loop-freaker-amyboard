@@ -27,8 +27,9 @@ def gcd(a, b):
 
 
 class Track:
-    def __init__(self, role):
+    def __init__(self, role, program_counts=None):
         self.role = role
+        self.program_counts = program_counts if program_counts is not None else PROGRAM_COUNTS[role]
         self.channel = CHANNELS[role]
         self.pattern = []
         self.stash = []  # hidden tail retained when a loop is shortened
@@ -62,9 +63,11 @@ class Engine:
     Called from a single event loop. No desktop threads, mido or blocking sleeps.
     Chord voicings tie across steps; every drum hit retriggers, including repeats.
     """
-    def __init__(self, sink, generate=True):
+    def __init__(self, sink, generate=True, program_counts=None):
         self.sink = sink
-        self.tracks = {role: Track(role) for role in ROLES}
+        self.program_counts = {role: tuple((program_counts or PROGRAM_COUNTS)[role])
+                               for role in ROLES}
+        self.tracks = {role: Track(role, self.program_counts[role]) for role in ROLES}
         self.drum_muted = {part: part in ('toms', 'rimshot', 'cymbals') for part in PARTS}
         self.scale_name = 'C Major'
         self.scale = patterns.SCALE_PRESETS[self.scale_name][:]
@@ -79,6 +82,8 @@ class Engine:
         self.cv_zero = 60
         self.cv_gate = 5
         self.drum_genre = 'HOUSE'
+        self.ghost_percent = 35
+        self.clock_source = 'INTERNAL'
         self.drum_roll_beats = 128
         self.break_duration_beats = random.randint(2, 16)
         self.roll_due_step = self.drum_roll_beats * 4
@@ -301,6 +306,24 @@ class Engine:
         self.sink.preset(track)
         return True
 
+    def set_program_counts(self, role, counts):
+        if role not in ROLES or not 1 <= len(counts) <= 16 or any(
+                type(count) is not int or not 1 <= count <= 128 for count in counts):
+            raise ValueError('invalid preset banks')
+        counts = tuple(counts)
+        if counts == self.program_counts[role]:
+            return
+        track = self.tracks[role]
+        self.program_counts[role] = counts
+        track.program_counts = counts
+        if self.preset_preferences is not None:
+            self.preset_preferences.ranges = self.program_counts
+        if not valid_preset(role, track.bank, track.program, self.program_counts):
+            self.silence(role)
+            track.bank = clamp(track.bank, 0, len(counts) - 1)
+            track.program = clamp(track.program, 0, counts[track.bank] - 1)
+            self.sink.preset(track)
+
     def set_transpose(self, role, value):
         self.silence(role)
         self.tracks[role].transpose = clamp(value, -48, 48)
@@ -504,7 +527,8 @@ class Engine:
         track = self.tracks[role]
         if self.preset_preferences is None:
             track.bank, track.program = move_preset(
-                role, 0, 0, random.randint(0, sum(PROGRAM_COUNTS[role]) - 1))
+                role, 0, 0, random.randint(0, sum(self.program_counts[role]) - 1),
+                self.program_counts)
         else:
             track.bank, track.program = self.preset_preferences.choose(role, track.channel)
         self.sink.preset(track)
@@ -513,7 +537,8 @@ class Engine:
         if role not in ROLES or delta == 0:
             return
         track = self.tracks[role]
-        bank, program = move_preset(role, track.bank, track.program, delta)
+        bank, program = move_preset(role, track.bank, track.program, delta,
+                                    self.program_counts)
         if (bank, program) != (track.bank, track.program):
             self.silence(role)
             track.bank, track.program = bank, program
@@ -863,8 +888,8 @@ class Engine:
         if keep_channel:
             # Existing routing stays collision-free while old/new tracks coexist.
             t.channel = channel
-        if not valid_preset(role, t.bank, t.program):
-            counts = PROGRAM_COUNTS[role]
+        if not valid_preset(role, t.bank, t.program, self.program_counts):
+            counts = self.program_counts[role]
             t.bank = clamp(t.bank, 0, len(counts) - 1)
             t.program = clamp(t.program, 0, counts[t.bank] - 1)
         t.direction = source.get('direction', 'FORWARD')
@@ -1022,7 +1047,8 @@ class Engine:
 
     def _with_ghost_note(self, notes, step):
         """Occasional quiet hits on the eighth-note offbeat, not saved in loops."""
-        if step % 4 != 2 or self.tracks['drum'].muted or random.random() >= 0.35:
+        if (step % 4 != 2 or self.tracks['drum'].muted or
+                random.random() * 100 >= self.ghost_percent):
             return notes
         sounding = {note for note, _ in notes}
         candidates = [note for note, part in ((38, 'snare'), (37, 'rimshot'),
@@ -1031,6 +1057,9 @@ class Engine:
         if candidates:
             notes.append((random.choice(candidates), random.randint(24, 55)))
         return notes
+
+    def set_ghost_percent(self, value):
+        self.ghost_percent = clamp(value, 0, 100)
 
     def _available_drum_notes(self, sounding):
         return [note for note, part in ((38, 'snare'), (37, 'rimshot'),

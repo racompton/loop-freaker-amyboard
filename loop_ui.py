@@ -1,6 +1,7 @@
 """OLED menu state and debounced encoder gestures; no hardware imports."""
 from loop_engine import ROLES, NAMES, PARTS, DIRECTIONS, clamp
 from loop_preset_preferences import preset_number
+from loop_settings import CLOCK_SOURCES
 import loop_patterns as patterns
 
 
@@ -19,7 +20,8 @@ def compact_key(name):
 
 def preset_label(role, track):
     if role == 'chords':
-        return 'P%d' % preset_number(role, track.bank, track.program)
+        return 'P%d' % preset_number(role, track.bank, track.program,
+                                     {role: track.program_counts})
     return 'B%d P%d' % (track.bank + 1, track.program + 1)
 
 
@@ -77,6 +79,10 @@ class Menu:
         self.stack = []
         self.editing = False
         self.genre_candidate = None
+        self.channel_candidate = None
+        self.clock_candidate = None
+        self.settings_changed = None
+        self.clock_changed = None
         self.last_activity = now
         self.sleeping = False
         self.screensaver_enabled = False
@@ -106,10 +112,17 @@ class Menu:
                 rows += ['DRUM PARTS']
             return rows
         if self.page == 'settings':
-            return ['MIDI CHANNELS', 'CV SOURCE', 'TEMPO', 'MIX', 'AUTO PLAY',
+            return ['MIDI CHANNELS', 'PRESET BANKS', 'GHOST NOTES', 'CLOCK SOURCE',
+                    'CV SOURCE', 'TEMPO', 'MIX', 'AUTO PLAY',
                     'SCREENSAVER', 'PLAY / STOP']
         if self.page == 'channels':
             return [NAMES[r] for r in ROLES]
+        if self.page == 'banks':
+            return [NAMES[r] for r in ROLES]
+        if self.page.startswith('banks:'):
+            counts = self.engine.program_counts[self.page[6:]]
+            return ['BANK COUNT'] + ['BANK %d PRESETS' % (i + 1)
+                                     for i in range(len(counts))]
         if self.page == 'drum_roll':
             return ['TRIGGER NOW', 'AUTO EVERY']
         if self.page.startswith('preset:'):
@@ -131,6 +144,8 @@ class Menu:
         self.stack.append((self.page, self.index))
         self.page, self.index, self.editing = page, 0, False
         self.genre_candidate = None
+        self.channel_candidate = None
+        self.clock_candidate = None
         if page in ('load', 'delete') and self.set_store:
             self.saved_names = self.set_store.list_names()
             if page == 'load':
@@ -147,9 +162,15 @@ class Menu:
         key = self._saved_key(name)
         return key is not None and patterns.camelot_compatible(self.engine.scale_name, key)
 
+    def _channel_in_use(self, role, channel):
+        return any(track.channel == channel for other, track in self.engine.tracks.items()
+                   if other != role)
+
     def back(self):
         self.editing = False
         self.genre_candidate = None
+        self.channel_candidate = None
+        self.clock_candidate = None
         if self.stack:
             self.page, self.index = self.stack.pop()
             self.index = min(self.index, len(self.rows()) - 1)
@@ -192,7 +213,12 @@ class Menu:
                 genre = self.genre_candidate if self.editing else e.drum_genre
                 return '%s %d' % (genre, patterns.DRUM_TEMPOS[genre] if self.editing else e.bpm)
         if self.page == 'channels':
-            return str(e.tracks[ROLES[self.index]].channel)
+            role = ROLES[self.index]
+            channel = self.channel_candidate if self.editing else e.tracks[role].channel
+            return 'CH%d IN USE' % channel if self.editing and self._channel_in_use(role, channel) else 'CH%d' % channel
+        if self.page.startswith('banks:'):
+            counts = e.program_counts[self.page[6:]]
+            return str(len(counts)) if self.index == 0 else str(counts[self.index - 1])
         if self.page == 'drum_roll' and row == 'AUTO EVERY':
             return '%d BEATS' % e.drum_roll_beats if e.drum_roll_beats else 'OFF'
         if self.page == 'load' and row in self.saved_names:
@@ -206,6 +232,10 @@ class Menu:
                       if e.preset_preferences else 'NORMAL')
             return 'CH%d %s' % (track.channel, status)
         if self.page == 'settings':
+            if row == 'GHOST NOTES':
+                return '%d%%' % e.ghost_percent
+            if row == 'CLOCK SOURCE':
+                return self.clock_candidate if self.editing else getattr(e, 'clock_source', 'INTERNAL')
             if row == 'CV SOURCE':
                 return NAMES.get(e.cv_role, 'OFF')
             if row == 'TEMPO':
@@ -266,8 +296,28 @@ class Menu:
                 e.set_drum_roll_beats(e.drum_roll_beats + delta * 32)
         elif self.page == 'channels':
             role = ROLES[self.index]
-            if not e.set_channel(role, e.tracks[role].channel + delta):
+            current = self.channel_candidate if self.channel_candidate is not None else e.tracks[role].channel
+            self.channel_candidate = (current - 1 + delta) % 16 + 1
+            if self._channel_in_use(role, self.channel_candidate):
                 self.show_notice('CHANNEL IN USE', now)
+        elif self.page.startswith('banks:'):
+            role = self.page[6:]
+            counts = list(e.program_counts[role])
+            if self.index == 0:
+                target = clamp(len(counts) + delta, 1, 16)
+                counts = (counts + [128] * (target - len(counts)))[:target]
+            else:
+                counts[self.index - 1] = clamp(counts[self.index - 1] + delta, 1, 128)
+            e.set_program_counts(role, counts)
+            if self.settings_changed:
+                self.settings_changed(now)
+        elif self.page == 'settings' and row == 'GHOST NOTES':
+            e.set_ghost_percent(e.ghost_percent + delta * 5)
+            if self.settings_changed:
+                self.settings_changed(now)
+        elif self.page == 'settings' and row == 'CLOCK SOURCE':
+            current = self.clock_candidate or getattr(e, 'clock_source', 'INTERNAL')
+            self.clock_candidate = CLOCK_SOURCES[(CLOCK_SOURCES.index(current) + delta) % len(CLOCK_SOURCES)]
         elif self.page == 'settings' and row == 'CV SOURCE':
             sources = (None,) + ROLES
             e.set_cv_role(sources[(sources.index(e.cv_role) + delta) % len(sources)])
@@ -294,8 +344,21 @@ class Menu:
             if self.page == 'drum' and row == 'GENRE' and self.genre_candidate:
                 e.set_drum_genre(self.genre_candidate)
                 self.show_notice(self.genre_candidate, now)
+            if self.page == 'channels':
+                role = ROLES[self.index]
+                channel = self.channel_candidate
+                if channel is not None and self._channel_in_use(role, channel):
+                    self.show_notice('CHANNEL IN USE', now)
+                    return
+                if channel is not None:
+                    e.set_channel(role, channel)
+            if self.page == 'settings' and row == 'CLOCK SOURCE' and self.clock_candidate:
+                if self.clock_changed:
+                    self.clock_changed(self.clock_candidate, now)
             self.editing = False
             self.genre_candidate = None
+            self.channel_candidate = None
+            self.clock_candidate = None
         elif self.page == 'main':
             if self.index == 0:
                 e.randomize_all()
@@ -343,13 +406,22 @@ class Menu:
             else:
                 e.toggle_mute(self.page)
         elif self.page == 'settings':
-            if self.index == 0:
+            if row == 'MIDI CHANNELS':
                 self.enter('channels')
+            elif row == 'PRESET BANKS':
+                self.enter('banks')
             elif row == 'PLAY / STOP':
                 e.stop() if e.playing else e.start()
             else:
                 self.editing = True
+                if row == 'CLOCK SOURCE':
+                    self.clock_candidate = getattr(e, 'clock_source', 'INTERNAL')
         elif self.page == 'channels':
+            self.editing = True
+            self.channel_candidate = e.tracks[ROLES[self.index]].channel
+        elif self.page == 'banks':
+            self.enter('banks:' + ROLES[self.index])
+        elif self.page.startswith('banks:'):
             self.editing = True
         elif self.page == 'drum_roll':
             if row == 'TRIGGER NOW':

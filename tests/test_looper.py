@@ -964,8 +964,61 @@ class MenuTests(unittest.TestCase):
 
     def test_settings_has_no_internal_sound_editor(self):
         self.m.enter('settings')
-        self.assertEqual(['MIDI CHANNELS', 'CV SOURCE', 'TEMPO', 'MIX',
+        self.assertEqual(['MIDI CHANNELS', 'PRESET BANKS', 'GHOST NOTES',
+                          'CLOCK SOURCE', 'CV SOURCE', 'TEMPO', 'MIX',
                           'AUTO PLAY', 'SCREENSAVER', 'PLAY / STOP'], self.m.rows())
+
+    def test_channel_editor_can_pass_occupied_channel_without_selecting_it(self):
+        self.m.enter('channels')
+        self.m.index = 0  # SYNTH is on 4; BASS is on 3.
+        self.m.click(1)
+        self.m.adjust(-1, 2)
+        self.assertEqual('CH3 IN USE', self.m.selected_value())
+        self.m.click(3)
+        self.assertTrue(self.m.editing)
+        self.assertEqual(4, self.e.tracks['lead'].channel)
+        self.m.adjust(-1, 4)
+        self.assertEqual('CH2', self.m.selected_value())
+        self.m.click(5)
+        self.assertFalse(self.m.editing)
+        self.assertEqual(2, self.e.tracks['lead'].channel)
+
+    def test_bank_editor_updates_manual_and_random_preset_ranges(self):
+        self.m.enter('banks')
+        self.m.index = 1  # BASS
+        self.m.click(1)
+        self.assertEqual(['BANK COUNT', 'BANK 1 PRESETS'], self.m.rows())
+        self.m.click(2)
+        self.m.adjust(1, 3)
+        self.m.click(4)
+        self.assertEqual(2, len(self.e.program_counts['bass']))
+        self.m.index = 2
+        self.m.click(5)
+        self.m.adjust(-126, 6)
+        self.m.click(7)
+        self.assertEqual((101, 2), self.e.program_counts['bass'])
+        self.e.tracks['bass'].bank, self.e.tracks['bass'].program = 0, 100
+        self.e.step_preset('bass', 1)
+        self.assertEqual((1, 0), (self.e.tracks['bass'].bank,
+                                  self.e.tracks['bass'].program))
+        for _ in range(100):
+            self.e.randomize_preset('bass')
+            self.assertTrue(valid_preset('bass', self.e.tracks['bass'].bank,
+                                         self.e.tracks['bass'].program,
+                                         self.e.program_counts))
+
+    def test_live_ghost_hits_are_quiet_and_only_on_offbeats(self):
+        drums = self.e.tracks['drum']
+        drums.muted = False
+        self.e.drum_muted['snare'] = False
+        self.e.set_ghost_percent(100)
+        for step in range(16):
+            hits = self.e._with_ghost_note([], step)
+            self.assertEqual(bool(hits), step % 4 == 2)
+            if hits:
+                self.assertTrue(24 <= hits[0][1] <= 55)
+        self.e.set_ghost_percent(0)
+        self.assertEqual([], self.e._with_ghost_note([], 2))
 
     def test_tick_wrap_for_idle(self):
         modulus = 1 << 20

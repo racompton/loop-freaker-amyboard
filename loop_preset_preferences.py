@@ -24,20 +24,20 @@ def _integer(value, low, high):
     return type(value) is int and low <= value <= high
 
 
-def valid_preset(role, bank, program):
-    counts = PROGRAM_COUNTS.get(role)
+def valid_preset(role, bank, program, ranges=None):
+    counts = (ranges or PROGRAM_COUNTS).get(role)
     return (counts is not None and _integer(bank, 0, len(counts) - 1) and
             _integer(program, 0, counts[bank] - 1))
 
 
-def preset_number(role, bank, program):
+def preset_number(role, bank, program, ranges=None):
     """One-based position across the role's stored preset ranges."""
-    return sum(PROGRAM_COUNTS[role][:bank]) + program + 1
+    return sum((ranges or PROGRAM_COUNTS)[role][:bank]) + program + 1
 
 
-def move_preset(role, bank, program, delta):
-    counts = PROGRAM_COUNTS[role]
-    if not valid_preset(role, bank, program):
+def move_preset(role, bank, program, delta, ranges=None):
+    counts = (ranges or PROGRAM_COUNTS)[role]
+    if not valid_preset(role, bank, program, ranges):
         raise ValueError('invalid bank or program')
     position = (sum(counts[:bank]) + program + delta) % sum(counts)
     for next_bank, count in enumerate(counts):
@@ -57,16 +57,16 @@ def _valid_entries(entries):
             return False
         if set(entry) != {'preferred', 'deleted'}:
             return False
-        counts = PROGRAM_COUNTS[role]
-        limit_program = 52 if role == 'lead' else max(counts) - 1
-        legacy_total = len(counts) * (limit_program + 1)
+        # Stored choices may come from an earlier custom bank layout. Keep
+        # structurally valid pairs and filter against the current layout below.
+        legacy_total = 16 * 128
         seen = set()
         for status in ('preferred', 'deleted'):
             values = entry[status]
             if not isinstance(values, list) or len(values) > legacy_total:
                 return False
             for pair in values:
-                if not isinstance(pair, list) or len(pair) != 2 or not _integer(pair[0], 0, len(counts) - 1) or not _integer(pair[1], 0, limit_program):
+                if not isinstance(pair, list) or len(pair) != 2 or not _integer(pair[0], 0, 15) or not _integer(pair[1], 0, 127):
                     return False
                 item = (pair[0], pair[1])
                 if item in seen:
@@ -77,14 +77,14 @@ def _valid_entries(entries):
     return True
 
 
-def _sanitize_entries(entries):
+def _sanitize_entries(entries, ranges=PROGRAM_COUNTS):
     cleaned = {}
     for key, entry in entries.items():
         role = key.split(':', 1)[0]
         valid = {status: [pair for pair in entry[status]
-                          if valid_preset(role, pair[0], pair[1])]
+                          if valid_preset(role, pair[0], pair[1], ranges)]
                  for status in ('preferred', 'deleted')}
-        if len(valid['deleted']) >= sum(PROGRAM_COUNTS[role]):
+        if len(valid['deleted']) >= sum(ranges[role]):
             valid['deleted'] = []
         if valid['preferred'] or valid['deleted']:
             cleaned[key] = valid
@@ -92,8 +92,9 @@ def _sanitize_entries(entries):
 
 
 class PresetPreferences:
-    def __init__(self, prefix=DEFAULT_PREFIX):
+    def __init__(self, prefix=DEFAULT_PREFIX, ranges=None):
         self.prefix = prefix
+        self.ranges = ranges or PROGRAM_COUNTS
         self.entries = {}
         self.revision = 0
         self.active = None
@@ -106,7 +107,7 @@ class PresetPreferences:
                         not _valid_entries(data.get('entries'))):
                     continue
                 if data['revision'] > self.revision:
-                    self.entries = _sanitize_entries(data['entries'])
+                    self.entries = _sanitize_entries(data['entries'], self.ranges)
                     self.revision = data['revision']
                     self.active = slot
             except (OSError, ValueError, TypeError):
@@ -121,7 +122,7 @@ class PresetPreferences:
         return role + ':' + str(channel)
 
     def _pair(self, role, bank, program):
-        if not valid_preset(role, bank, program):
+        if not valid_preset(role, bank, program, self.ranges):
             raise ValueError('invalid bank or program')
         return [bank, program]
 
@@ -146,7 +147,7 @@ class PresetPreferences:
         if status != 'NORMAL':
             name = 'preferred' if status == 'PREFERRED' else 'deleted'
             entry[name].append(pair)
-        if len(entry['deleted']) >= sum(PROGRAM_COUNTS[role]):
+        if len([pair for pair in entry['deleted'] if valid_preset(role, *pair, self.ranges)]) >= sum(self.ranges[role]):
             raise ValueError('cannot delete every preset')
         next_entries = self.entries.copy()
         if entry['preferred'] or entry['deleted']:
@@ -182,7 +183,7 @@ class PresetPreferences:
 
     def choose(self, role, channel):
         key = self._key(role, channel)
-        counts = PROGRAM_COUNTS[role]
+        counts = self.ranges[role]
         entry = self.entries.get(key, {'preferred': [], 'deleted': []})
         preferred = entry['preferred']
         deleted = entry['deleted']
