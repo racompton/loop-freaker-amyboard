@@ -4,6 +4,7 @@ import struct
 import amyboard
 import tulip
 import sequencer
+import loop_random as random
 try:
     import midi
 except ImportError:
@@ -75,6 +76,14 @@ class App:
         self.engine.ghost_velocity = self.settings.ghost_velocity
         self.engine.ghost_on_muted = self.settings.ghost_on_muted
         self.engine.swing = self.settings.swing
+        self.engine.lead_style = self.settings.lead_style
+        self.engine.bass_style = self.settings.bass_style
+        self.engine.chord_style = self.settings.chord_style
+        self.engine.drum_style = self.settings.drum_style
+        self.engine.lead_density = self.settings.lead_density
+        self.engine.bass_density = self.settings.bass_density
+        self.engine.chord_density = self.settings.chord_density
+        self.engine.drum_density = self.settings.drum_density
         self.engine.clock_source = self.settings.clock_source
         self.engine.preset_preferences = PresetPreferences(ranges=self.engine.program_counts)
         # Make the first set exactly as RANDOMIZE would, before MIDI Start.
@@ -92,10 +101,14 @@ class App:
         self.menu.io_request = self._queue_io
         self.menu.settings_changed = self._settings_changed
         self.menu.clock_changed = self._set_clock_source
+        self.menu.random_request = self._queue_global_randomize
         self.io_job = None
         self.settings_job = None
         self.settings_dirty_at = None
         self.auto_job = None
+        self.global_job = None
+        self.global_applied = False
+        self.engine.on_global = lambda: setattr(self, 'global_applied', True)
         self.last_clock_us = None
         self.micros = time.ticks_us if hasattr(time, 'ticks_us') else lambda: time.ticks_ms() * 1000
         self.engine.on_load = lambda name: self.menu.show_notice('LOADED ' + name, time.ticks_ms())
@@ -138,6 +151,14 @@ class App:
         self.settings.ghost_velocity = self.engine.ghost_velocity
         self.settings.ghost_on_muted = self.engine.ghost_on_muted
         self.settings.swing = self.engine.swing
+        self.settings.lead_style = self.engine.lead_style
+        self.settings.bass_style = self.engine.bass_style
+        self.settings.chord_style = self.engine.chord_style
+        self.settings.drum_style = self.engine.drum_style
+        self.settings.lead_density = self.engine.lead_density
+        self.settings.bass_density = self.engine.bass_density
+        self.settings.chord_density = self.engine.chord_density
+        self.settings.drum_density = self.engine.drum_density
         self.settings.program_counts = {role: tuple(counts) for role, counts in
                                         self.engine.program_counts.items()}
         self.settings.clock_source = self.engine.clock_source
@@ -417,8 +438,64 @@ class App:
     def _deliver_input(self, now, delta, click, held, activity):
         self.menu.handle(now, delta, click, held, activity)
 
+    def _queue_global_randomize(self, now):
+        if self.global_job is not None or self.io_job is not None:
+            self.menu.show_notice('BUSY', now)
+            return
+        if not self.engine.playing:
+            self.engine.randomize_all()
+            self._settings_changed(now)
+            self.menu.bam_at = now
+            return
+        engine = self.engine
+        engine.pending_load = engine.mix_state = engine.auto_state = engine.auto_plan = None
+        engine.auto_due_step = None
+        engine.pending_global = None
+        self.auto_job = None
+        result = {}
+        self.global_job = {'result': result, 'steps': engine.prepare_auto_steps(result),
+                           'drum_muted': engine.tracks['drum'].muted}
+        self.menu.busy = True
+        self.menu.show_notice('RANDOMIZING...', now)
+
+    def _service_global_randomize(self, now):
+        job = self.global_job
+        if job is None or not self._clock_slack(12000):
+            return
+        try:
+            next(job['steps'])
+        except StopIteration:
+            self.global_job = None
+            self.menu.busy = False
+            plan = job['result']['value']
+            engine = self.engine
+            if not engine.auto_play:
+                plan['saved']['tracks']['drum']['muted'] = job['drum_muted']
+                for role in ('lead', 'bass', 'chords'):
+                    if not engine.track_locks[role]:
+                        plan['saved']['tracks'][role]['muted'] = random.choice((True, False))
+            if plan['signature'] != engine.auto_signature():
+                self.menu.show_notice('RETRY RANDOMIZE', now)
+                return
+            boundary = (engine.phase_origin + ((engine.step - engine.phase_origin) // 16 + 1) * 16
+                        if engine.quantize_actions else engine.step)
+            engine.pending_global = (boundary, plan)
+            self.menu.bam_at = now
+            self.menu.show_notice('NEXT BAR' if engine.quantize_actions else 'NEW SET!', now)
+        except Exception as exc:
+            self.global_job = None
+            self.menu.busy = False
+            print('Global randomize failed:', exc)
+            self.menu.show_notice('RANDOM FAILED', now)
+
     def _service_auto(self):
         engine = self.engine
+        if self.global_job is not None or engine.pending_global is not None:
+            return
+        if all(engine.track_locks.values()):
+            self.auto_job = None
+            engine.auto_plan = None
+            return
         if (not engine.auto_play or not engine.playing or engine.pending_load or
                 engine.mix_state or engine.auto_state):
             self.auto_job = None
@@ -470,6 +547,10 @@ class App:
                 self.tempo = self.engine.bpm
                 sequencer.tempo(self.tempo)
             self._service_io(now)
+            self._service_global_randomize(now)
+            if self.global_applied:
+                self.global_applied = False
+                self._settings_changed(now)
             self._service_settings(now)
             self._service_auto()
             # Coalesce fast encoder turns. Never build another OLED frame while

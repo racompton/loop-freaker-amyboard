@@ -8,7 +8,7 @@ except ImportError:
 
 import loop_random as random
 import loop_patterns as patterns
-from loop_engine import ROLES, PARTS, DIRECTIONS
+from loop_engine import ROLES, PARTS, DIRECTIONS, LEAD_STYLES, BASS_STYLES, CHORD_STYLES, DRUM_STYLES
 
 SET_DIR = '/user/sets'
 ADJECTIVES = (
@@ -54,9 +54,18 @@ def validate_set_steps(data):
         raise ValueError('invalid tempo')
     if 'chord_size' in data and not _integer(data['chord_size'], 1, 5):
         raise ValueError('invalid chord size')
+    for name, choices in (('lead_style', LEAD_STYLES), ('bass_style', BASS_STYLES),
+                          ('chord_style', CHORD_STYLES), ('drum_style', DRUM_STYLES)):
+        if name in data and data[name] not in choices:
+            raise ValueError('invalid style')
+    for name in ('lead_density', 'bass_density', 'chord_density', 'drum_density'):
+        if name in data and not _integer(data[name], 10, 90):
+            raise ValueError('invalid density')
     roll_beats = data.get('drum_roll_beats', 128)
     if not _integer(roll_beats, 0, 1024) or roll_beats % 32:
         raise ValueError('invalid drum roll interval')
+    if not _integer(data.get('roll_length_beats', 8), 4, 32):
+        raise ValueError('invalid drum roll length')
     if 'break_duration_beats' in data and not _integer(data['break_duration_beats'], 2, 16):
         raise ValueError('invalid kick break duration')
     if data.get('drum_genre') not in patterns.DRUM_GENRES:

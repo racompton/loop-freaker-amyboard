@@ -389,6 +389,56 @@ def lead_remove_notes_inplace(pattern, count=None):
     for i in random.sample(note_idxs, k=k):
         pattern[i] = None
 
+def melodic_lead(scale, chords, length=16, style='MELODIC', density=50, shared=None):
+    """Create a short motif, repeat it and fit its strong notes to the chords."""
+    if not scale or length < 1:
+        return []
+    pool = sorted(set(scale))
+    if shared:
+        common = [note for note in pool if note % 12 in shared]
+        if common:
+            pool = common
+    chance = max(0.1, min(0.9, density / 100.0))
+    chance *= 0.65 if style == 'MINIMAL' else 1.35 if style == 'BUSY' else 1.0
+    motif = []
+    pattern = []
+    previous = pool[0]
+    chord_cache = {}
+    for step in range(length):
+        pos = step % 8
+        repeat = step >= 8 and pos < len(motif)
+        template = motif[pos] if repeat else None
+        occupied = (template is not None if repeat else (step == 0 or random.random() < chance))
+        if repeat and pos == 7 and random.random() < 0.5:
+            occupied = not occupied
+        chord = chords[step % len(chords)] if chords else None
+        previous_chord = chords[(step - 1) % len(chords)] if chords and step else None
+        if step and chord and previous_chord and chord != previous_chord and random.random() < 0.35:
+            occupied = False  # leave room for the chord change
+        chord_key = tuple(chord) if chord else ()
+        if chord_key not in chord_cache:
+            tones = {note % 12 for note in chord_key}
+            chord_cache[chord_key] = [n for n in pool if n % 12 in tones]
+        if not occupied:
+            note = None
+        else:
+            candidates = pool
+            chord_pool = chord_cache[chord_key]
+            if chord_pool and (step % 4 == 0 or random.random() < 0.6):
+                candidates = chord_pool
+            if repeat and template is not None:
+                anchor = template
+            else:
+                anchor = previous
+            closest = min(abs(n - anchor) for n in candidates)
+            nearby = [n for n in candidates if abs(n - anchor) <= closest + 2]
+            note = random.choice(nearby)
+            previous = note
+        pattern.append(note)
+        if step < 8:
+            motif.append(note)
+    return pattern
+
 def generate_pattern(scale, role, scale_name=None, chord_size=4):
     if role == 'drum':
         LOOP_LENGTH = STEPS_PER_BAR

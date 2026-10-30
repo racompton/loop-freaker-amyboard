@@ -1,5 +1,6 @@
 """OLED menu state and debounced encoder gestures; no hardware imports."""
-from loop_engine import ROLES, NAMES, PARTS, DIRECTIONS, clamp
+from loop_engine import (ROLES, NAMES, PARTS, DIRECTIONS, LEAD_STYLES, BASS_STYLES,
+                         CHORD_STYLES, DRUM_STYLES, clamp)
 from loop_preset_preferences import preset_number
 from loop_settings import CLOCK_SOURCES
 import loop_patterns as patterns
@@ -79,10 +80,12 @@ class Menu:
         self.stack = []
         self.editing = False
         self.genre_candidate = None
+        self.direction_candidate = None
         self.channel_candidate = None
         self.clock_candidate = None
         self.settings_changed = None
         self.clock_changed = None
+        self.random_request = None
         self.last_activity = now
         self.sleeping = False
         self.screensaver_enabled = False
@@ -94,18 +97,24 @@ class Menu:
 
     def rows(self):
         if self.page == 'main':
-            return ['RANDOMIZE', 'SYNTH', 'BASS', 'CHORD', 'DRUMS', 'SAVE', 'LOAD', 'SETTINGS']
+            return ['RANDOMIZE', 'SYNTH', 'BASS', 'CHORD', 'DRUMS', 'SAVE', 'LOAD', 'PERFORM', 'LOCKS', 'SETTINGS']
         if self.page in ROLES:
             track = self.engine.tracks[self.page]
             rows = ['RANDOMIZE', 'RANDOM NOTES', 'RANDOM PRESET',
                     'PRESET ' + preset_label(self.page, track),
                     'LOOP LENGTH']
+            if self.page == 'lead':
+                rows += ['VARIATION', 'STYLE', 'DENSITY']
+            elif self.page == 'bass':
+                rows += ['STYLE', 'DENSITY']
+            elif self.page == 'chords':
+                rows += ['STYLE', 'DENSITY']
             if self.page != 'drum':
                 rows += ['DIRECTION', 'OCTAVE', '# of NOTES']
                 if self.page == 'chords':
                     rows += ['CHORD SIZE']
             else:
-                rows += ['GENRE', 'GHOST NOTES', 'GHOST VELOCITY', 'GHOST ON MUTES', 'DRUM ROLL']
+                rows += ['GENRE', 'STYLE', 'DENSITY', 'GHOST NOTES', 'GHOST VELOCITY', 'GHOST ON MUTES', 'DRUM ROLL']
             rows += ['AUTO UNMUTED' if self.page == 'drum' and self.engine.auto_play
                      else 'UNMUTE' if self.engine.tracks[self.page].muted else 'MUTE']
             if self.page == 'drum':
@@ -115,6 +124,14 @@ class Menu:
             return ['MIDI CHANNELS', 'PRESET BANKS', 'CLOCK SOURCE',
                     'CV OUTPUT FROM', 'TEMPO', 'SWING', 'MIX', 'AUTO PLAY',
                     'SCREENSAVER', 'PLAY / STOP']
+        if self.page == 'perform':
+            rows = [('UNMUTE ' if self.engine.tracks[r].muted else 'MUTE ') + NAMES[r]
+                    for r in ROLES]
+            rows += [('UNMUTE KICK' if self.engine.drum_muted['kick'] else 'MUTE KICK'),
+                     'VARIATION', 'DRUM ROLL', 'TEMPO', 'NEXT BAR']
+            return rows
+        if self.page == 'locks':
+            return ['KEY'] + [NAMES[r] for r in ROLES] + ['P ' + NAMES[r] for r in ROLES]
         if self.page == 'channels':
             return [NAMES[r] for r in ROLES]
         if self.page == 'banks':
@@ -124,7 +141,7 @@ class Menu:
             return ['BANK COUNT'] + ['BANK %d PRESETS' % (i + 1)
                                      for i in range(len(counts))]
         if self.page == 'drum_roll':
-            return ['TRIGGER NOW', 'AUTO EVERY']
+            return ['TRIGGER NOW', 'AUTO EVERY', 'LENGTH']
         if self.page.startswith('preset:'):
             return ['SELECT PRESET', 'PREFER PRESET', 'DELETE PRESET', 'NORMAL PRESET']
         if self.page == 'load':
@@ -144,6 +161,7 @@ class Menu:
         self.stack.append((self.page, self.index))
         self.page, self.index, self.editing = page, 0, False
         self.genre_candidate = None
+        self.direction_candidate = None
         self.channel_candidate = None
         self.clock_candidate = None
         if page in ('load', 'delete') and self.set_store:
@@ -169,6 +187,7 @@ class Menu:
     def back(self):
         self.editing = False
         self.genre_candidate = None
+        self.direction_candidate = None
         self.channel_candidate = None
         self.clock_candidate = None
         if self.stack:
@@ -192,6 +211,12 @@ class Menu:
             return None
         row = rows[self.index]
         if self.page in ROLES:
+            if row == 'STYLE':
+                return getattr(e, {'lead': 'lead_style', 'bass': 'bass_style',
+                                   'chords': 'chord_style', 'drum': 'drum_style'}[self.page])
+            if row == 'DENSITY':
+                return '%d%%' % getattr(e, {'lead': 'lead_density', 'bass': 'bass_density',
+                                            'chords': 'chord_density', 'drum': 'drum_density'}[self.page])
             if row.startswith('PRESET '):
                 track = e.tracks[self.page]
                 if e.preset_preferences:
@@ -202,7 +227,7 @@ class Menu:
                 length = len(e.tracks[self.page].pattern)
                 return '%d STEPS' % length
             if row == 'DIRECTION':
-                return e.tracks[self.page].direction
+                return self.direction_candidate if self.editing else e.tracks[self.page].direction
             if row == 'OCTAVE':
                 return '%+d' % e.tracks[self.page].octave
             if row == '# of NOTES':
@@ -222,11 +247,27 @@ class Menu:
             role = ROLES[self.index]
             channel = self.channel_candidate if self.editing else e.tracks[role].channel
             return 'CH%d IN USE' % channel if self.editing and self._channel_in_use(role, channel) else 'CH%d' % channel
+        if self.page == 'locks':
+            value = (e.key_locked if self.index == 0 else
+                     e.track_locks[ROLES[self.index - 1]] if self.index <= 4 else
+                     e.preset_locks[ROLES[self.index - 5]])
+            return 'LOCKED' if value else 'UNLOCKED'
+        if self.page == 'perform':
+            if self.index < 4:
+                return 'MUTED' if e.tracks[ROLES[self.index]].muted else 'ON'
+            if self.index == 4:
+                return 'MUTED' if e.drum_muted['kick'] else 'ON'
+            if row == 'TEMPO':
+                return '%d BPM' % e.bpm
+            if row == 'NEXT BAR':
+                return 'ON' if e.quantize_actions else 'OFF'
         if self.page.startswith('banks:'):
             counts = e.program_counts[self.page[6:]]
             return str(len(counts)) if self.index == 0 else str(counts[self.index - 1])
         if self.page == 'drum_roll' and row == 'AUTO EVERY':
             return '%d BEATS' % e.drum_roll_beats if e.drum_roll_beats else 'OFF'
+        if self.page == 'drum_roll' and row == 'LENGTH':
+            return '%d BEATS' % e.roll_length_beats
         if self.page == 'load' and row in self.saved_names:
             return 'KEY MATCH' if self._compatible_saved(row) else 'OTHER KEY'
         if self.page.startswith('preset:'):
@@ -261,6 +302,8 @@ class Menu:
         if e.auto_play:
             if not e.playing:
                 return 'AUTO PAUSED'
+            if all(e.track_locks.values()):
+                return 'AUTO LOCKED'
             due, role = e.auto_next_change()
             beats = max(0, (due - e.step + 3) // 4) if due is not None else 0
             return '%dB>%s' % (beats, NAMES[role] if role else 'PREP')
@@ -282,9 +325,29 @@ class Menu:
         row = rows[self.index]
         if self.page in ROLES and row == 'LOOP LENGTH':
             e.set_loop_length(self.page, delta)
+        elif self.page in ROLES and row == 'STYLE':
+            styles = {'lead': LEAD_STYLES, 'bass': BASS_STYLES,
+                      'chords': CHORD_STYLES, 'drum': DRUM_STYLES}[self.page]
+            field = {'lead': 'lead_style', 'bass': 'bass_style',
+                     'chords': 'chord_style', 'drum': 'drum_style'}[self.page]
+            current = getattr(e, field)
+            value = styles[(styles.index(current) + delta) % len(styles)]
+            if self.page == 'chords' and current != value:
+                e.silence('chords')
+            setattr(e, field, value)
+            if self.settings_changed:
+                self.settings_changed(now)
+        elif self.page in ROLES and row == 'DENSITY':
+            field = {'lead': 'lead_density', 'bass': 'bass_density',
+                     'chords': 'chord_density', 'drum': 'drum_density'}[self.page]
+            setattr(e, field, clamp(getattr(e, field) + delta * 5, 10, 90))
+            if self.settings_changed:
+                self.settings_changed(now)
+        elif self.page == 'perform' and row == 'TEMPO':
+            e.set_bpm(e.bpm + delta)
         elif self.page in ROLES and row == 'DIRECTION':
-            current = e.tracks[self.page].direction
-            e.set_direction(self.page, DIRECTIONS[(DIRECTIONS.index(current) + delta) % len(DIRECTIONS)])
+            current = self.direction_candidate or e.tracks[self.page].direction
+            self.direction_candidate = DIRECTIONS[(DIRECTIONS.index(current) + delta) % len(DIRECTIONS)]
         elif self.page in ROLES and row == 'OCTAVE':
             e.set_octave(self.page, e.tracks[self.page].octave + delta)
         elif self.page in ROLES and row == '# of NOTES':
@@ -300,6 +363,8 @@ class Menu:
                 self.show_notice('AUTO ROLL 128', now)
             else:
                 e.set_drum_roll_beats(e.drum_roll_beats + delta * 32)
+        elif self.page == 'drum_roll' and row == 'LENGTH':
+            e.roll_length_beats = clamp(e.roll_length_beats + delta, 4, 32)
         elif self.page == 'channels':
             role = ROLES[self.index]
             current = self.channel_candidate if self.channel_candidate is not None else e.tracks[role].channel
@@ -359,6 +424,8 @@ class Menu:
             return
         row = rows[self.index]
         if self.editing:
+            if self.page in ROLES and row == 'DIRECTION' and self.direction_candidate:
+                e.set_direction(self.page, self.direction_candidate)
             if self.page == 'drum' and row == 'GENRE' and self.genre_candidate:
                 e.set_drum_genre(self.genre_candidate)
                 self.show_notice(self.genre_candidate, now)
@@ -375,12 +442,18 @@ class Menu:
                     self.clock_changed(self.clock_candidate, now)
             self.editing = False
             self.genre_candidate = None
+            self.direction_candidate = None
             self.channel_candidate = None
             self.clock_candidate = None
         elif self.page == 'main':
             if self.index == 0:
-                e.randomize_all()
-                self.bam_at = now
+                if self.random_request is not None:
+                    self.random_request(now)
+                else:
+                    e.randomize_all()
+                    if self.settings_changed:
+                        self.settings_changed(now)
+                    self.bam_at = now
             elif row == 'SAVE':
                 if self.set_store is None:
                     self.show_notice('NO STORAGE', now)
@@ -397,24 +470,43 @@ class Menu:
                 self.enter('load')
             elif row == 'SETTINGS':
                 self.enter('settings')
+            elif row == 'PERFORM':
+                self.enter('perform')
+            elif row == 'LOCKS':
+                self.enter('locks')
             else:
                 self.enter(ROLES[self.index - 1])
         elif self.page in ROLES:
             if row == 'RANDOMIZE':
-                e.randomize_track(self.page)
-                self.bam_at = now
+                if e.randomize_track(self.page):
+                    self.bam_at = now
+                    if self.settings_changed:
+                        self.settings_changed(now)
+                else:
+                    self.show_notice('TRACK LOCKED', now)
             elif row == 'RANDOM NOTES':
-                e.randomize_notes(self.page)
-                self.show_notice('NEW NOTES!', now)
+                if e.track_locks[self.page]:
+                    self.show_notice('TRACK LOCKED', now)
+                else:
+                    e.randomize_notes(self.page)
+                    self.show_notice('NEW NOTES!', now)
             elif row == 'RANDOM PRESET':
-                e.randomize_preset(self.page)
-                self.show_notice('NEW PRESET!', now)
+                if e.track_locks[self.page] or e.preset_locks[self.page]:
+                    self.show_notice('PRESET LOCKED', now)
+                else:
+                    e.randomize_preset(self.page)
+                    self.show_notice('NEW PRESET!', now)
+            elif row == 'VARIATION':
+                self.show_notice(('QUEUED' if e.quantize_actions and e.playing else 'VARIATION')
+                                 if e.perform('variation') else 'TRACK LOCKED', now)
             elif row.startswith('PRESET '):
                 self.enter('preset:' + self.page)
-            elif row in ('LOOP LENGTH', 'DIRECTION', 'OCTAVE', '# of NOTES', 'CHORD SIZE', 'GENRE', 'GHOST NOTES', 'GHOST VELOCITY', 'GHOST ON MUTES'):
+            elif row in ('LOOP LENGTH', 'DIRECTION', 'OCTAVE', '# of NOTES', 'CHORD SIZE', 'GENRE', 'GHOST NOTES', 'GHOST VELOCITY', 'GHOST ON MUTES', 'STYLE', 'DENSITY'):
                 self.editing = True
                 if row == 'GENRE':
                     self.genre_candidate = e.drum_genre
+                elif row == 'DIRECTION':
+                    self.direction_candidate = e.tracks[self.page].direction
             elif row == 'DRUM ROLL':
                 self.enter('drum_roll')
             elif row == 'DRUM PARTS':
@@ -423,6 +515,35 @@ class Menu:
                 self.show_notice('DRUMS STAY ON', now)
             else:
                 e.toggle_mute(self.page)
+        elif self.page == 'perform':
+            if self.index < 4:
+                ok = e.perform('mute', ROLES[self.index])
+            elif self.index == 4:
+                ok = e.perform('kick')
+            elif row == 'VARIATION':
+                ok = e.perform('variation')
+            elif row == 'DRUM ROLL':
+                ok = e.perform('roll')
+            elif row == 'NEXT BAR':
+                e.quantize_actions = not e.quantize_actions
+                return
+            else:
+                self.editing = True
+                return
+            self.show_notice(('QUEUED' if e.quantize_actions and e.playing else 'DONE')
+                             if ok else 'UNAVAILABLE', now)
+        elif self.page == 'locks':
+            if e.auto_state or e.mix_state:
+                self.show_notice('MIX IN PROGRESS', now)
+            elif self.index == 0:
+                e.key_locked = not e.key_locked
+            elif self.index <= 4:
+                role = ROLES[self.index - 1]
+                e.track_locks[role] = not e.track_locks[role]
+            else:
+                role = ROLES[self.index - 5]
+                e.preset_locks[role] = not e.preset_locks[role]
+            e.auto_plan = None
         elif self.page == 'settings':
             if row == 'MIDI CHANNELS':
                 self.enter('channels')

@@ -81,6 +81,9 @@ SYNTH
   PRESET B1 P1  (shows current external bank/program)
     SELECT PRESET / PREFER PRESET / DELETE PRESET / NORMAL PRESET
   LOOP LENGTH
+  VARIATION      change up to two existing notes
+  STYLE          MELODIC / MINIMAL / BUSY
+  DENSITY        10–90% (generation setting)
   DIRECTION      FORWARD / REVERSE / PING PONG / RANDOM
   OCTAVE
   # of NOTES
@@ -92,6 +95,8 @@ BASS / CHORD
   PRESET B1 P1  (BASS) / PRESET P1  (CHORD)
     SELECT PRESET / PREFER PRESET / DELETE PRESET / NORMAL PRESET
   LOOP LENGTH
+  STYLE / DENSITY (BASS: GROOVE / ROOTS / WALKING;
+                   CHORD: HOLD / ARP / HIT)
   DIRECTION      FORWARD / REVERSE / PING PONG / RANDOM
   OCTAVE
   # of NOTES
@@ -105,12 +110,14 @@ DRUMS
     SELECT PRESET / PREFER PRESET / DELETE PRESET / NORMAL PRESET
   LOOP LENGTH
   GENRE          HOUSE / TECHNO / BREAKS / ELECTRO / DRUM'N'BASS
+  STYLE / DENSITY (GROOVE / SPARSE / BUSY)
   GHOST NOTES    0–100% in 5% steps; default 35%
   GHOST VELOCITY 1–127; default 70, varied by up to ±10
   GHOST ON MUTES OFF / ON; default OFF
   DRUM ROLL
     TRIGGER NOW
     AUTO EVERY    OFF or 32–1024 beats in steps of 32; default 128
+    LENGTH        4–32 beats; default 8
   MUTE / UNMUTE
   DRUM PARTS
     KICK / SNARE / TOMS / RIMSHOT / CLAP / HATS / CYMBALS
@@ -122,6 +129,12 @@ LOAD
   DELETE...
     [SAVED SET NAMES]
       CANCEL / DELETE SET
+PERFORM
+  MUTE / UNMUTE for SYNTH / BASS / CHORD / DRUMS / KICK
+  VARIATION / DRUM ROLL / TEMPO / NEXT BAR
+LOCKS
+  KEY / SYNTH / BASS / CHORD / DRUMS
+  P SYNTH / P BASS / P CHORD / P DRUMS
 SETTINGS
   MIDI CHANNELS
     SYNTH / BASS / CHORD / DRUMS
@@ -138,6 +151,34 @@ SETTINGS
   SCREENSAVER    OFF / ON
   PLAY / STOP
 ```
+
+SYNTH favors chord tones on strong steps, moves mostly to nearby notes, and
+repeats an eight-step motif with occasional changed endings. STYLE and DENSITY
+controls shape the next generated pattern and are stored as
+device settings. BASS adds root anchors on available kick beats; SYNTH sometimes
+leaves space at chord changes. During AUTO PLAY, generated synth notes favor
+pitch classes shared by the outgoing and incoming keys.
+
+CHORD STYLE also affects the current loop: HOLD sustains chord voicings, ARP
+repeats their notes as sixteenths, and HIT plays a short chord at each new
+voicing. DRUMS STYLE varies the pattern within the selected genre and does not
+change the genre or tempo. DENSITY controls each instrument independently.
+
+PERFORM provides track and kick mutes, a synth VARIATION, a drum roll, and TEMPO
+in one page. Each mute row says MUTE or UNMUTE according to its current state.
+NEXT BAR queues global RANDOMIZE, mutes, VARIATION, and DRUM ROLL for the next 16-step bar;
+OFF executes them immediately. The queued synth variation is prepared ahead of
+time, and discarded if the synth pattern changes before the bar. Tempo edits
+remain immediate. Instrument-specific randomization actions remain immediate.
+Global RANDOMIZE prepares the new tracks in short background slices before
+switching them, keeping generation out of the note callback.
+
+LOCKS protects KEY, individual tracks, or individual presets from RANDOMIZE
+and AUTO PLAY generation. A locked melodic track also holds the key so its notes
+are not carried into a different scale. Direct edits and LOAD remain available;
+locks are session controls and reset on reboot. AUTO PLAY's minimum audible
+instrument and drum-unmute rules still apply. Lock changes wait until a running
+mix or AUTO PLAY handoff is complete.
 
 GHOST NOTES controls extra live drum hits: on the eighth-note offbeat, each
 eligible step has the configured chance of adding one snare, rimshot, clap,
@@ -194,10 +235,12 @@ Instrument RANDOM NOTES keeps the scale and preset. RANDOM PRESET keeps notes
 and mute state. Each melodic note-count detent adds or removes one occupied
 step, from one to the current loop length. Existing notes at other steps stay
 as they were; OCTAVE changes by 12 semitones.
-The first item inside each instrument, RANDOMIZE, changes only that
-instrument's notes and preset, always unmutes it, and shows the BAM! starburst. DRUMS
+The first item inside each instrument, RANDOMIZE, changes that instrument's
+notes, preset, style, density, and loop length, always unmutes it, and shows the BAM! starburst. DRUMS
 also randomizes its individual part mutes but always unmutes the kick.
-MIDI channel, octave, and loop length stay as configured. When any melodic
+MIDI channel and octave stay as configured. The main RANDOMIZE and AUTO PLAY
+also choose styles, densities, and loop lengths for unlocked tracks. Drum genre
+and genre tempo stay unchanged by randomization. When any melodic
 track's notes are randomized, there is a one-in-three chance its note
 durations will vary; each held note ends by the next note in that track.
 CHORD SIZE changes the number of simultaneous pitches in each sounding chord
@@ -207,7 +250,8 @@ Each LOOP LENGTH detent halves or doubles that instrument's loop, between 1 and
 64 sixteenth notes. Randomization chooses a fixed 64-step note bank;
 shortening hides its tail and lengthening reveals the same notes and hits.
 The hidden tail is saved with the set. Older sets generate any missing tail
-once on their first extension. DIRECTION changes melodic playback order:
+once on their first extension. Turn DIRECTION to preview and click to apply.
+DIRECTION changes melodic playback order:
 FORWARD is the default, REVERSE reads backward, PING PONG bounces between
 the ends, and RANDOM plays every step once per cycle in a shuffled order.
 Turn GENRE to preview a style, then click to confirm.
@@ -315,7 +359,7 @@ during ordinary playback. A 2–16 beat kick break is chosen once for the set;
 it ends at beat 64, repeats at the end of every 64-beat cycle with the same
 duration, removes the kick and adds random other drum hits, then resumes the
 saved loop. The duration is retained in saved sets. AUTO EVERY
-triggers a one-bar snare/tom roll with claps on roughly one quarter of its hits
+triggers a 4–32 beat snare/tom roll (8 beats by default) with claps on roughly one quarter of its hits
 when claps are unmuted, after the selected beat interval (128 by
 default); OFF disables automatic rolls and TRIGGER NOW still plays a manual
 one. The roll and kick break alter

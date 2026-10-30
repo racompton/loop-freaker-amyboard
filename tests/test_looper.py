@@ -60,6 +60,117 @@ class SequencerTests(unittest.TestCase):
         self.assertEqual(3, len([x for x in self.sink.events if x[0] == 'off']))
         self.assertIn(('cv', 1, 0), self.sink.events)
 
+    def test_chord_hold_arp_and_hit_styles(self):
+        track = self.e.tracks['chords']
+        track.pattern = [[60, 64, 67]] * 4 + [None]
+        track.lengths = [1, 1, 1, 1, 0]
+        track.muted = False
+        self.e.chord_style = 'HOLD'
+        self.assertEqual([60, 64, 67], [n for n, _ in self.e.notes_at(track, 1)])
+        self.e.chord_style = 'ARP'
+        self.assertEqual([60, 64, 67, 60],
+                         [self.e.notes_at(track, step)[0][0] for step in range(4)])
+        self.e.chord_style = 'HIT'
+        self.assertEqual([60, 64, 67], [n for n, _ in self.e.notes_at(track, 0)])
+        self.assertEqual([], self.e.notes_at(track, 1))
+        self.assertEqual([], self.e.notes_at(track, 2))
+        self.assertEqual([60, 64, 67], [n for n, _ in self.e.notes_at(track, 5)])
+        track.pattern = [[60, 64, 67]] * 4
+        track.lengths = [1] * 4
+        self.assertEqual([60, 64, 67], [n for n, _ in self.e.notes_at(track, 4)])
+
+    def test_randomize_selects_new_character_and_length_for_each_unlocked_track(self):
+        self.e.track_locks['bass'] = True
+        with patch.object(self.e, '_randomize_character', wraps=self.e._randomize_character) as choose:
+            self.e.randomize_all()
+        self.assertEqual({'lead', 'chords', 'drum'}, {call.args[0] for call in choose.call_args_list})
+        self.assertEqual(16, len(self.e.tracks['bass'].pattern))
+        for role in ROLES:
+            self.assertIn(len(self.e.tracks[role].pattern), (1, 2, 4, 8, 16, 32, 64))
+        genre = self.e.drum_genre
+        with patch.object(self.e, '_randomize_character', wraps=self.e._randomize_character) as choose:
+            self.e.randomize_track('drum')
+        choose.assert_called_once_with('drum')
+        self.assertEqual(genre, self.e.drum_genre)
+        self.assertIn(self.e.drum_style, ('GROOVE', 'SPARSE', 'BUSY'))
+        self.assertIn(self.e.drum_density, (30, 40, 50, 60, 70, 80))
+
+    def test_roll_length_is_saved_and_current_roll_finishes_at_original_length(self):
+        self.e.roll_length_beats = 4
+        self.assertTrue(self.e.trigger_drum_roll())
+        self.assertEqual(16, self.e.roll_remaining)
+        self.e.roll_length_beats = 12
+        for _ in range(16):
+            self.e.advance()
+        self.assertEqual(0, self.e.roll_remaining)
+        saved = self.e.snapshot()
+        self.assertEqual(12, saved['roll_length_beats'])
+        self.e.roll_length_beats = 8
+        self.e._apply_saved('TEST', saved)
+        self.assertEqual(12, self.e.roll_length_beats)
+
+    def test_melody_strong_notes_follow_chords_and_shared_keys(self):
+        scale = [60, 62, 64, 65, 67, 69, 71]
+        chords = [[60, 64, 67]] * 8 + [[62, 65, 69]] * 8
+        for _ in range(30):
+            melody = loop_patterns.melodic_lead(scale, chords, 16, density=90)
+            for step in (0, 4, 8, 12):
+                if melody[step] is not None:
+                    self.assertIn(melody[step] % 12, [n % 12 for n in chords[step]])
+            shared = {0, 2, 4, 7, 9}
+            melody = loop_patterns.melodic_lead(scale, chords, 16, shared=shared)
+            self.assertTrue(all(n is None or n % 12 in shared for n in melody))
+
+    def test_randomize_respects_track_key_and_preset_locks(self):
+        self.e.tracks['lead'].pattern = [60, None, 64, None]
+        self.e.tracks['lead'].muted = False
+        self.e.track_locks['lead'] = True
+        self.e.preset_locks['bass'] = True
+        original_key = self.e.scale_name
+        original_bass_preset = (self.e.tracks['bass'].bank, self.e.tracks['bass'].program)
+        self.e.randomize_all()
+        self.assertEqual([60, None, 64, None], self.e.tracks['lead'].pattern)
+        self.assertFalse(self.e.tracks['lead'].muted)
+        self.assertEqual(original_key, self.e.scale_name)
+        self.assertEqual(original_bass_preset, (self.e.tracks['bass'].bank,
+                                                self.e.tracks['bass'].program))
+        self.assertFalse(self.e.randomize_track('lead'))
+
+    def test_next_bar_queues_variation_and_mutes(self):
+        self.e.tracks['lead'].pattern = [60, None, 64, None] * 4
+        self.e.tracks['lead'].lengths = [1, 0, 1, 0] * 4
+        original = self.e.tracks['lead'].pattern[:]
+        self.e.quantize_actions = True
+        self.e.step = 3
+        self.assertTrue(self.e.perform('variation'))
+        self.assertTrue(self.e.perform('mute', 'bass'))
+        self.assertEqual(original, self.e.tracks['lead'].pattern)
+        self.assertFalse(self.e.tracks['bass'].muted)
+        self.e.step = 15
+        self.e.advance()
+        self.assertFalse(self.e.tracks['bass'].muted)
+        self.e.advance()
+        self.assertTrue(self.e.tracks['bass'].muted)
+        changed = sum(a != b for a, b in zip(original, self.e.tracks['lead'].pattern))
+        self.assertTrue(1 <= changed <= 2)
+        self.assertEqual([n is None for n in original],
+                         [n is None for n in self.e.tracks['lead'].pattern])
+
+    def test_auto_plan_keeps_locked_roles_and_key(self):
+        self.e.track_locks['lead'] = True
+        self.e.preset_locks['bass'] = True
+        self.e.auto_order = list(ROLES)
+        original_key = self.e.scale_name
+        bass = self.e.tracks['bass']
+        result = {}
+        for _ in self.e.prepare_auto_steps(result):
+            pass
+        plan = result['value']
+        self.assertEqual(original_key, plan['new_key'])
+        self.assertNotIn('lead', plan['order'])
+        self.assertEqual((bass.bank, bass.program),
+                         (plan['saved']['tracks']['bass']['bank'], plan['saved']['tracks']['bass']['program']))
+
     def test_zero_note_is_a_real_note(self):
         self.e.tracks['lead'].pattern = [0, None]
         self.e.advance()
@@ -125,7 +236,7 @@ class SequencerTests(unittest.TestCase):
         with patch.object(loop_patterns, 'generate_pattern', wraps=loop_patterns.generate_pattern) as gen:
             self.e.randomize_all()
         generated_roles = [c.args[1] for c in gen.call_args_list]
-        self.assertEqual(['chords', 'bass', 'lead', 'drum'],
+        self.assertEqual(['chords', 'bass', 'drum'],
                          list(dict.fromkeys(generated_roles)))
         self.assertTrue(self.e.tracks['drum'].muted)
         self.assertEqual(4, len([x for x in self.sink.events if x[0] == 'preset']))
@@ -164,12 +275,12 @@ class SequencerTests(unittest.TestCase):
             for role in ROLES:
                 track = self.e.tracks[role]
                 track.muted = True
-                length, channel, octave = len(track.pattern), track.channel, track.octave
+                channel, octave = track.channel, track.octave
                 self.sink.events.clear()
                 self.e.randomize_track(role)
                 self.assertFalse(track.muted)
-                self.assertEqual((length, channel, octave),
-                                 (len(track.pattern), track.channel, track.octave))
+                self.assertIn(len(track.pattern), (1, 2, 4, 8, 16, 32, 64))
+                self.assertEqual((channel, octave), (track.channel, track.octave))
                 self.assertTrue(any(event[0] == 'preset' and event[1] == channel
                                     for event in self.sink.events))
         self.assertFalse(self.e.drum_muted['kick'])
@@ -386,20 +497,20 @@ class SequencerTests(unittest.TestCase):
         with patch.object(loop_random, 'random', return_value=0.0):
             self.assertNotEqual(39, self.e._roll_notes(0)[0][0])
 
-    def test_auto_roll_for_one_bar_then_original_drums_return(self):
+    def test_auto_roll_for_eight_beats_then_original_drums_return(self):
         track = self.e.tracks['drum']
         track.pattern = [[(36, 110)]] * 16
         track.muted = False
         self.assertEqual(128, self.e.drum_roll_beats)
         self.e.set_drum_roll_beats(32)
         self.assertEqual(128, self.e.roll_due_step)
-        for step in range(128, 144):
+        for step in range(128, 160):
             self.e.step = step
             self.sink.events.clear()
             self.e.advance()
             self.assertTrue(any(event[0] == 'on' and event[1] == 10 for event in self.sink.events))
             self.assertFalse(any(event[:3] == ('on', 10, 36) for event in self.sink.events))
-        self.e.step = 144
+        self.e.step = 160
         self.sink.events.clear()
         self.e.advance()
         self.assertIn(('on', 10, 36, 110), self.sink.events)
@@ -490,7 +601,7 @@ class SequencerTests(unittest.TestCase):
         self.assertEqual([72, 76, 79, 83], self.e.tracks['chords'].pattern[0])
         self.assertEqual([(36, 110)], self.e.tracks['drum'].pattern[0])
         self.e.roll_due_step = 300
-        for step in range(265, 317):
+        for step in range(265, 333):
             self.e.step = step
             self.e.advance()
         self.assertEqual([(38, 110)], self.e.tracks['drum'].pattern[0])
@@ -538,8 +649,8 @@ class SequencerTests(unittest.TestCase):
         for role in ROLES:
             self.assertEqual(before['tracks'][role]['channel'],
                              plan['saved']['tracks'][role]['channel'])
-            self.assertEqual(len(before['tracks'][role]['pattern']),
-                             len(plan['saved']['tracks'][role]['pattern']))
+            self.assertIn(len(plan['saved']['tracks'][role]['pattern']),
+                          (1, 2, 4, 8, 16, 32, 64))
         self.assertFalse(plan['saved']['tracks']['drum']['muted'])
         self.assertGreaterEqual(sum(not plan['saved']['tracks'][role]['muted']
                                     for role in ('lead', 'bass', 'chords')), 2)
@@ -682,11 +793,11 @@ class MenuTests(unittest.TestCase):
         self.m = Menu(self.e)
 
     def test_order_actions_and_long_press_from_edit_goes_up(self):
-        self.assertEqual(['RANDOMIZE', 'SYNTH', 'BASS', 'CHORD', 'DRUMS', 'SAVE', 'LOAD', 'SETTINGS'], self.m.rows())
+        self.assertEqual(['RANDOMIZE', 'SYNTH', 'BASS', 'CHORD', 'DRUMS', 'SAVE', 'LOAD', 'PERFORM', 'LOCKS', 'SETTINGS'], self.m.rows())
         self.m.handle(1, delta=1)
         self.m.handle(2, click=True)
-        self.assertEqual(['RANDOMIZE', 'RANDOM NOTES', 'RANDOM PRESET', 'PRESET B1 P1', 'LOOP LENGTH', 'DIRECTION', 'OCTAVE', '# of NOTES', 'MUTE'], self.m.rows())
-        self.m.handle(3, delta=6)
+        self.assertEqual(['RANDOMIZE', 'RANDOM NOTES', 'RANDOM PRESET', 'PRESET B1 P1', 'LOOP LENGTH', 'VARIATION', 'STYLE', 'DENSITY', 'DIRECTION', 'OCTAVE', '# of NOTES', 'MUTE'], self.m.rows())
+        self.m.handle(3, delta=self.m.rows().index('OCTAVE'))
         self.m.handle(4, click=True)
         self.m.handle(5, delta=1)
         self.assertEqual(1, self.e.tracks['lead'].octave)
@@ -709,10 +820,34 @@ class MenuTests(unittest.TestCase):
             self.m.handle(1, click=True)
             for expected in ('REVERSE', 'PING PONG', 'RANDOM', 'FORWARD'):
                 self.m.handle(2, delta=1)
-                self.assertEqual(expected, self.e.tracks[role].direction)
+                self.assertEqual(expected, self.m.selected_value())
+                self.assertEqual('FORWARD', self.e.tracks[role].direction)
+            self.m.handle(3, delta=1)
+            self.m.handle(4, click=True)
+            self.assertEqual('REVERSE', self.e.tracks[role].direction)
             self.m.back()
         self.m.enter('drum')
         self.assertNotIn('DIRECTION', self.m.rows())
+
+    def test_direction_preview_is_cancelled_by_long_press(self):
+        self.m.enter('lead')
+        self.m.index = self.m.rows().index('DIRECTION')
+        self.m.click(1)
+        self.m.handle(2, delta=1)
+        self.assertEqual('REVERSE', self.m.selected_value())
+        self.assertEqual('FORWARD', self.e.tracks['lead'].direction)
+        self.m.handle(3, long_press=True)
+        self.assertEqual('FORWARD', self.e.tracks['lead'].direction)
+
+    def test_roll_length_menu_supports_four_to_thirty_two_beats(self):
+        self.m.enter('drum_roll')
+        self.m.index = self.m.rows().index('LENGTH')
+        self.assertEqual('8 BEATS', self.m.selected_value())
+        self.m.click(1)
+        self.m.handle(2, delta=100)
+        self.assertEqual('32 BEATS', self.m.selected_value())
+        self.m.handle(3, delta=-100)
+        self.assertEqual('4 BEATS', self.m.selected_value())
 
     def test_screensaver_boundary_wake_only_and_preserves_edit(self):
         self.m.screensaver_enabled = True
@@ -763,7 +898,7 @@ class MenuTests(unittest.TestCase):
         self.m.click(4)
         self.m.index = 0
         self.m.click(5)
-        self.assertEqual(16, self.e.roll_remaining)
+        self.assertEqual(32, self.e.roll_remaining)
 
     def test_mix_defaults_on_and_auto_roll_can_be_disabled(self):
         self.m.enter('settings')
@@ -1000,6 +1135,46 @@ class MenuTests(unittest.TestCase):
         self.assertEqual(['MIDI CHANNELS', 'PRESET BANKS',
                           'CLOCK SOURCE', 'CV OUTPUT FROM', 'TEMPO', 'SWING', 'MIX',
                           'AUTO PLAY', 'SCREENSAVER', 'PLAY / STOP'], self.m.rows())
+
+    def test_performance_and_locks_menu_controls(self):
+        self.m.enter('perform')
+        self.m.index = self.m.rows().index('NEXT BAR')
+        self.m.click(1)
+        self.assertTrue(self.e.quantize_actions)
+        self.m.index = self.m.rows().index('MUTE BASS')
+        self.e.start()
+        self.m.click(2)
+        self.assertFalse(self.e.tracks['bass'].muted)
+        self.assertEqual(1, len(self.e.pending_actions))
+        self.m.back()
+        self.m.enter('locks')
+        self.m.index = self.m.rows().index('P SYNTH')
+        self.m.click(3)
+        self.assertTrue(self.e.preset_locks['lead'])
+        self.assertEqual('LOCKED', self.m.selected_value())
+
+    def test_performance_mute_labels_and_kick_control(self):
+        self.m.enter('perform')
+        self.assertIn('MUTE BASS', self.m.rows())
+        self.m.index = self.m.rows().index('MUTE BASS')
+        self.m.click(1)
+        self.assertIn('UNMUTE BASS', self.m.rows())
+        self.m.index = self.m.rows().index('MUTE KICK')
+        self.m.click(2)
+        self.assertTrue(self.e.drum_muted['kick'])
+        self.assertIn('UNMUTE KICK', self.m.rows())
+
+    def test_lead_and_bass_character_controls_are_independent(self):
+        self.m.enter('lead')
+        self.m.index = self.m.rows().index('STYLE')
+        self.m.click(1)
+        self.m.handle(2, delta=1)
+        self.assertEqual('MINIMAL', self.e.lead_style)
+        self.m.click(3)
+        self.m.index = self.m.rows().index('DENSITY')
+        self.m.click(4)
+        self.m.handle(5, delta=2)
+        self.assertEqual((60, 50), (self.e.lead_density, self.e.bass_density))
 
     def test_ghost_notes_edit_is_in_drums_and_requests_persistence(self):
         changed = []

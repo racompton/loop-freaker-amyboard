@@ -19,6 +19,12 @@ class DeviceSettings:
         self.ghost_velocity = 70
         self.ghost_on_muted = False
         self.swing = 0
+        self.lead_style = 'MELODIC'
+        self.bass_style = 'GROOVE'
+        self.chord_style = 'HOLD'
+        self.drum_style = 'GROOVE'
+        self.lead_density = self.bass_density = 50
+        self.chord_density = self.drum_density = 50
         self.clock_source = 'INTERNAL'
         self.program_counts = {role: tuple(counts) for role, counts in PROGRAM_COUNTS.items()}
         try:
@@ -37,6 +43,18 @@ class DeviceSettings:
             swing = data.get('swing')
             if type(swing) is int and 0 <= swing <= 3:
                 self.swing = swing
+            if data.get('lead_style') in ('MELODIC', 'MINIMAL', 'BUSY'):
+                self.lead_style = data['lead_style']
+            if data.get('bass_style') in ('GROOVE', 'ROOTS', 'WALKING'):
+                self.bass_style = data['bass_style']
+            if data.get('chord_style') in ('HOLD', 'ARP', 'HIT'):
+                self.chord_style = data['chord_style']
+            if data.get('drum_style') in ('GROOVE', 'SPARSE', 'BUSY'):
+                self.drum_style = data['drum_style']
+            for name in ('lead_density', 'bass_density', 'chord_density', 'drum_density'):
+                value = data.get(name)
+                if type(value) is int and 10 <= value <= 90:
+                    setattr(self, name, value)
             source = data.get('clock_source')
             if source in CLOCK_SOURCES:
                 self.clock_source = source
@@ -53,6 +71,10 @@ class DeviceSettings:
         data = {'version': 1, 'ghost_percent': self.ghost_percent,
                 'ghost_velocity': self.ghost_velocity,
                 'ghost_on_muted': self.ghost_on_muted, 'swing': self.swing,
+                'lead_style': self.lead_style, 'bass_style': self.bass_style,
+                'lead_density': self.lead_density, 'bass_density': self.bass_density,
+                'chord_style': self.chord_style, 'drum_style': self.drum_style,
+                'chord_density': self.chord_density, 'drum_density': self.drum_density,
                 'clock_source': self.clock_source,
                 'program_counts': self.program_counts}
         encoded = json.dumps(data)

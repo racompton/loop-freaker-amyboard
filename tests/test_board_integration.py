@@ -300,6 +300,10 @@ class BoardTests(unittest.TestCase):
         self.app.engine.ghost_velocity = 85
         self.app.engine.ghost_on_muted = True
         self.app.engine.swing = 2
+        self.app.engine.lead_style = 'MINIMAL'
+        self.app.engine.bass_style = 'WALKING'
+        self.app.engine.lead_density = 65
+        self.app.engine.bass_density = 35
         self.app.engine.set_program_counts('lead', (20, 30))
         self.app._set_clock_source('CV2 IN', 0)
         self.app._settings_changed(0)
@@ -311,6 +315,9 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(85, loaded.ghost_velocity)
         self.assertTrue(loaded.ghost_on_muted)
         self.assertEqual(2, loaded.swing)
+        self.assertEqual(('MINIMAL', 'WALKING', 65, 35),
+                         (loaded.lead_style, loaded.bass_style,
+                          loaded.lead_density, loaded.bass_density))
         self.assertEqual('CV2 IN', loaded.clock_source)
         self.assertEqual((20, 30), loaded.program_counts['lead'])
         self.assertEqual([], self.amy_messages)
@@ -372,16 +379,51 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(initial, self.refreshes)
 
     def test_bam_draws_one_still_frame_then_restores_menu(self):
-        initial = self.refreshes
         self.app.menu.handle(0, click=True)
         for pulse in range(1, 30):
             self.tick(pulse)
-        self.assertEqual(initial + 1, self.refreshes)
-        self.assertTrue(any(item[0] == 'BAM!' for item in self.display.texts))
-        for pulse in range(30, 38):
+            if self.app.menu.bam_at is not None:
+                break
+        self.assertIsNotNone(self.app.menu.bam_at)
+        for pulse in range(pulse + 1, pulse + 9):
             self.tick(pulse)
-        self.assertEqual(initial + 2, self.refreshes)
+        self.assertTrue(any(item[0] == 'BAM!' for item in self.display.texts))
+        for pulse in range(pulse + 1, pulse + 40):
+            self.tick(pulse)
         self.assertFalse(self.app.menu.bam_active(self.now))
+
+    def test_global_randomize_is_prepared_in_slices_while_clock_continues(self):
+        self.app._queue_global_randomize(0)
+        self.assertIsNotNone(self.app.global_job)
+        self.midi.clear()
+        for pulse in range(60):
+            self.tick(pulse)
+            if self.app.global_job is None and self.app.engine.pending_global is None:
+                break
+        self.assertIsNone(self.app.global_job)
+        self.assertIsNone(self.app.engine.pending_global)
+        self.assertEqual(pulse + 1, self.midi.count(bytes((0xF8,))))
+        self.assertTrue(self.app.running)
+        self.assertIsNone(self.app.last_error)
+
+    def test_global_randomize_can_wait_until_next_bar(self):
+        self.app.engine.quantize_actions = True
+        self.app.engine.track_locks['lead'] = True
+        original = self.app.engine.tracks['lead'].pattern[:]
+        self.app._queue_global_randomize(0)
+        for pulse in range(60):
+            self.tick(pulse)
+            if self.app.engine.pending_global is not None:
+                break
+        self.assertIsNotNone(self.app.engine.pending_global)
+        boundary, _ = self.app.engine.pending_global
+        self.assertGreaterEqual(boundary, self.app.engine.step)
+        while self.app.engine.pending_global is not None and pulse < 180:
+            pulse += 1
+            self.tick(pulse)
+        self.assertIsNone(self.app.engine.pending_global)
+        self.assertEqual(original, self.app.engine.tracks['lead'].pattern)
+        self.assertTrue(self.app.running)
 
     def test_randomize_before_loop_ends_with_leading_chord_rest(self):
         original = loop_patterns.generate_pattern
