@@ -529,12 +529,11 @@ class BoardTests(unittest.TestCase):
     def test_click_applies_immediately_without_undo_snapshot(self):
         self.app.menu.enter('lead')
         self.app.menu.index = self.app.menu.rows().index('RANDOM NOTES')
-        before = self.app.engine.snapshot()
         self.app._tick(0)
-        with patch.object(self.app.controls, 'poll', return_value=(0, True, False, True)):
+        with patch.object(self.app.controls, 'poll', return_value=(0, True, False, True)), \
+                patch.object(self.app.engine, 'randomize_notes', wraps=self.app.engine.randomize_notes) as randomize:
             self.app._ui(None)
-        self.assertNotEqual(before['tracks']['lead']['pattern'],
-                            self.app.engine.snapshot()['tracks']['lead']['pattern'])
+        randomize.assert_called_once_with('lead')
         self.assertIsNone(self.app.io_job)
         self.assertTrue(self.app.running)
 
