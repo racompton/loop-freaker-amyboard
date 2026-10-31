@@ -361,27 +361,26 @@ HAT_GROOVES = {
 
 
 def randomize_genre_hats(cells, visible_length, genre):
-    """Replace hats in the fixed note bank without touching other drum parts."""
+    """Repeat one genre-inspired four- or eight-step hat motif across the bank."""
     if genre not in HAT_GROOVES:
         raise ValueError('unknown drum genre')
     closed, opened = random.choice(HAT_GROOVES[genre])
+    size = random.choice((4, 8))
+    motif = []
+    for step in range(size):
+        note = 42 if step in closed else 46 if step in opened else None
+        motif.append((note, random.randint(90, 127)) if note is not None else None)
+    # Very short visible loops must still contain a hat; keep the motif periodic.
+    visible = min(size, visible_length)
+    if visible and not any(motif[:visible]):
+        motif[0] = (42, random.randint(90, 127))
     result = []
     for i, cell in enumerate(cells):
         hits = [(note, velocity) for note, velocity in (cell or [])
                 if note not in DRUM_PARTS['hats']]
-        beat = i % STEPS_PER_BAR
-        if beat in closed:
-            hits.append((42, random.randint(65, 95) if beat % 4 == 0
-                         else random.randint(75, 110)))
-        elif beat in opened:
-            hits.append((46, random.randint(80, 110)))
+        if motif[i % size] is not None:
+            hits.append(motif[i % size])
         result.append(hits or None)
-    if visible_length and not any(
-            any(note in DRUM_PARTS['hats'] for note, _ in (cell or []))
-            for cell in result[:visible_length]):
-        hits = list(result[0] or [])
-        hits.append((42, random.randint(75, 100)))
-        result[0] = hits
     return result
 
 def drum_randomize_part_free(pattern, part):

@@ -105,15 +105,14 @@ class SequencerTests(unittest.TestCase):
                 self.assertTrue(any(hats[:16]))
                 self.assertEqual(hats[:16], hats[16:32])
                 self.assertEqual(hats[:16], hats[32:48])
-                closed = tuple(i for i, hit in enumerate(hats[:16]) if hit == (42,))
-                opened = tuple(i for i, hit in enumerate(hats[:16]) if hit == (46,))
-                self.assertIn((closed, opened), loop_patterns.HAT_GROOVES[genre])
+                self.assertEqual(hats[:8], hats[8:16])
+                self.assertTrue(all(len(hit) <= 1 for hit in hats))
 
     def test_short_hat_loop_keeps_audible_hit(self):
         track = self.e.tracks['drum']
         track.pattern, track.stash = [[(36, 100)]], [None] * 63
         self.e.drum_genre = 'HOUSE'
-        with patch.object(loop_random, 'choice', return_value=((), (2, 6, 10, 14))):
+        with patch.object(loop_random, 'choice', side_effect=[((), (2, 6, 10, 14)), 4]):
             self.e.randomize_part('hats')
         self.assertIn(42, [note for note, _ in track.pattern[0]])
 
@@ -277,6 +276,7 @@ class SequencerTests(unittest.TestCase):
         self.e.tracks['drum'].pattern = [[(36, 100), (41, 90)]]
         self.e.advance()
         self.e.release_drums()
+        self.e.step = 4
         self.e.advance()
         self.assertEqual(2, self.sink.events.count(('on', 10, 36, 127)))
         self.assertNotIn(('on', 10, 41, 90), self.sink.events)
@@ -535,10 +535,10 @@ class SequencerTests(unittest.TestCase):
         self.e.break_due_step = 240
         self.e.roll_due_step = 100000
         for offset in (0, 256, 512):
-            self.e.step = 239 + offset
+            self.e.step = 236 + offset
             self.sink.events.clear()
             self.e.advance()
-            self.assertIn(('on', 10, 36, 110), self.sink.events)
+            self.assertIn(('on', 10, 36, 127), self.sink.events)
             for step in range(240 + offset, 256 + offset):
                 self.e.step = step
                 self.sink.events.clear()
@@ -1624,23 +1624,65 @@ class GeneratedMusicTests(unittest.TestCase):
 
     def test_drums_velocities_and_fill_distribution(self):
         engine = Engine(Sink(), generate=False)
-        filled = 0
+        filled = kick_filled = 0
         for _ in range(400):
             bar = engine._generate_drums(16)
-            quiet = []
+            quiet, kicks = [], []
             for i, cell in enumerate(bar):
                 for note, velocity in cell or []:
-                    if note == 36 and i in (0, 4, 8, 12):
-                        self.assertEqual(127, velocity)
+                    if note == 36:
+                        kicks.append((i, velocity))
+                        if i in (0, 4, 8, 12):
+                            self.assertEqual(127, velocity)
+                        else:
+                            self.assertIn(i, (13, 14, 15))
+                            self.assertTrue(45 <= velocity <= 75)
+                            kick_filled += 1
                     elif velocity < 90:
                         quiet.append((i, velocity))
                     else:
                         self.assertLessEqual(velocity, 127)
+            self.assertTrue(all(any(i == step for i, _ in kicks) for step in (0, 4, 8, 12)))
             self.assertLessEqual(len(quiet), 1)
             if quiet:
                 self.assertIn(quiet[0][0], (13, 14, 15))
                 filled += 1
         self.assertTrue(65 < filled < 135, filled)
+        self.assertTrue(65 < kick_filled < 135, kick_filled)
+
+    def test_short_and_legacy_loops_filter_extra_kicks_and_hat_collisions(self):
+        engine = Engine(Sink(), generate=False)
+        track = engine.tracks['drum']
+        track.muted = False
+        engine.drum_muted = {part: False for part in engine.drum_muted}
+        for length in (1, 2, 4, 8, 16):
+            track.pattern = [[(36, 100), (42, 100), (46, 100)]] * length
+            for step in range(64):
+                notes = engine.notes_at(track, step)
+                self.assertEqual(step % 4 == 0, any(n == 36 for n, _ in notes))
+                self.assertFalse({42, 46}.issubset({n for n, _ in notes}))
+        track.pattern = [None] * 16
+        track.pattern[14] = [(36, 65)]
+        self.assertIn((36, 65), engine.notes_at(track, 14))
+        track.pattern[14] = [(36, 100)]
+        self.assertNotIn(36, [n for n, _ in engine.notes_at(track, 14)])
+
+    def test_hat_motif_repeats_for_generation_and_staged_plan(self):
+        engine = Engine(Sink())
+        for genre in loop_patterns.DRUM_GENRES:
+            engine.drum_genre = genre
+            engine.randomize_notes('drum')
+            bank = engine.tracks['drum'].pattern + engine.tracks['drum'].stash
+            hats = [tuple(hit for hit in cell or [] if hit[0] in (42, 46)) for cell in bank]
+            self.assertEqual(hats[:8] * 8, hats)
+            self.assertTrue(all(len(step) <= 1 for step in hats))
+        result = {}
+        for _ in engine.prepare_auto_steps(result):
+            pass
+        track = result['value']['saved']['tracks']['drum']
+        bank = track['pattern'] + track['stash']
+        hats = [tuple(tuple(hit) for hit in cell or [] if hit[0] in (42, 46)) for cell in bank]
+        self.assertEqual(hats[:8] * 8, hats)
 
     def test_slides_persist_and_send_overlap(self):
         class SlideSink(Sink):

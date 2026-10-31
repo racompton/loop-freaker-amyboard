@@ -167,7 +167,8 @@ using the old ARP style load as STACCATO. DRUMS STYLE varies the pattern within 
 change the genre or tempo. DENSITY controls each instrument independently.
 
 DRUMS → DRUM PARTS → HATS → RANDOM NOTES chooses a recognizable closed/open
-hat groove for the selected genre and repeats it across the fixed note bank.
+four- or eight-step hat motif inspired by the selected genre and repeats it
+across the fixed note bank. Open and closed hats never share a step.
 It preserves other drum parts and the hats' mute state. A very short loop is
 guaranteed at least one hat hit; widening it reveals the same generated tail.
 
@@ -189,7 +190,7 @@ mix or AUTO PLAY handoff is complete.
 
 GHOST NOTES controls extra live drum hits: on the eighth-note offbeat, each
 eligible step has the configured chance of adding one snare, rimshot, clap,
-tom, or hat. GHOST VELOCITY sets the center of the random velocity range; each
+or tom. Hats are excluded so the repeating hat motif remains intact. GHOST VELOCITY sets the center of the random velocity range; each
 hit varies by up to 10 in either direction, bounded by 1–127. GHOST ON MUTES
 allows ghosts to use individually muted parts when ON; OFF respects their mutes.
 Muting the whole DRUMS track always suppresses its ghosts, and notes already
@@ -468,8 +469,10 @@ with the set and survive loop resizing. On a slide, the looper sends TB-3 CC 102
 and overlaps the incoming and outgoing MIDI notes. The TB-3 needs firmware 1.10
 or later for CC 102; confirm the sound and slide response on the instrument.
 
-New drum loops have a one-in-four chance of one quieter extra hit on step 14,
-15, or 16 of an available bar. Loops shorter than 14 steps have no such step.
+New drum loops have independent one-in-four chances for a quieter kick and
+another quiet drum hit on step 14, 15, or 16 of an available bar. Loops shorter
+than 14 steps have no such step. Kicks otherwise play only on quarter-note beats,
+including when a short loop or an older saved set repeats.
 Ordinary generated drum hits use velocities 90–127; kick hits on steps 1, 5,
 9 and 13 use 127, the MIDI maximum. The quieter fill, configurable ghost notes,
 breaks and rolls retain their own dynamics.

@@ -161,6 +161,8 @@ class Engine:
                                         for cell in self.tracks[role].pattern]
             self.tracks[role].lengths_stash = []
             self._fill_hidden_tail(role, generated if role == 'lead' else None)
+            if role == 'drum':
+                self._refresh_hat_bank(self.tracks[role])
         if not skip_locked or not self.track_locks['lead']:
             self._make_slides()
 
@@ -295,25 +297,42 @@ class Engine:
         if self.drum_style == 'SPARSE':
             density *= 0.6
         for i, cell in enumerate(pattern):
-            hits = [hit for hit in (cell or []) if hit[0] == 36 or random.random() < density]
-            if self.drum_style == 'BUSY' and i % 2 and not any(hit[0] == 42 for hit in hits) and random.random() < self.drum_density / 250:
-                hits.append((42, random.randint(50, 85)))
-            pattern[i] = [(note, 127 if note == 36 and i % 16 in (0, 4, 8, 12)
-                           else random.randint(90, 127)) for note, _ in hits] or None
+            hits = [(note, random.randint(90, 127)) for note, _ in (cell or [])
+                    if note != 36 and note not in patterns.DRUM_PARTS['hats']
+                    and random.random() < density]
+            if i % 4 == 0:
+                hits.append((36, 127))
+            pattern[i] = hits or None
+        pattern = patterns.randomize_genre_hats(pattern, length, self.drum_genre)
         if fill:
             self._add_drum_fill(pattern, length)
+            self._add_kick_fill(pattern, length)
         return pattern
 
     def _add_drum_fill(self, bank, length):
-        # One decision per generated loop, including when preparation is sliced.
+        # Independent of the kick fill; preserve the existing quiet drum fill.
         positions = [i for i in range(min(length, len(bank))) if i % 16 in (13, 14, 15)]
         if not positions or random.randint(1, 4) != 1:
             return
         position = random.choice(positions)
         cell = bank[position] or []
-        choices = [note for note in (37, 38, 39, 41, 42, 46) if note not in {n for n, _ in cell}]
+        # Hats belong exclusively to their repeating motif.
+        choices = [note for note in (37, 38, 39, 41, 45, 50) if note not in {n for n, _ in cell}]
         if choices:
             bank[position] = cell + [(random.choice(choices), random.randint(45, 75))]
+
+    def _add_kick_fill(self, bank, length):
+        positions = [i for i in range(min(length, len(bank))) if i % 16 in (13, 14, 15)]
+        if positions and random.randint(1, 4) == 1:
+            position = random.choice(positions)
+            bank[position] = (bank[position] or []) + [(36, random.randint(45, 75))]
+
+    def _refresh_hat_bank(self, track):
+        length = len(track.pattern)
+        cells = patterns.randomize_genre_hats(track.pattern + track.stash, length, self.drum_genre)
+        track.pattern, track.stash = cells[:length], cells[length:]
+        track.lengths = [1 if cell is not None else 0 for cell in track.pattern]
+        track.lengths_stash = [1 if cell is not None else 0 for cell in track.stash]
 
     def _make_slides(self):
         track = self.tracks['lead']
@@ -683,6 +702,7 @@ class Engine:
                                        for cell in self.tracks['drum'].pattern]
         self.tracks['drum'].lengths_stash = []
         self._fill_hidden_tail('drum')
+        self._refresh_hat_bank(self.tracks['drum'])
         self.tempo_start_bpm = self.bpm
         self.tempo_target_bpm = patterns.DRUM_TEMPOS[genre]
         if self.playing and self.tempo_target_bpm != self.bpm:
@@ -744,6 +764,8 @@ class Engine:
         self.tracks[role].lengths_stash = []
         self.tracks[role].random_cycle = None
         self._fill_hidden_tail(role, lead_motif)
+        if role == 'drum':
+            self._refresh_hat_bank(self.tracks[role])
         self._maybe_randomize_lengths(role)
         if role == 'lead':
             self._make_slides()
@@ -996,6 +1018,8 @@ class Engine:
                     bank.extend(staged._generate_drums(16, fill=False))
                     yield
                 staged._add_drum_fill(bank, length)
+                staged._add_kick_fill(bank, length)
+                bank = patterns.randomize_genre_hats(bank, length, staged.drum_genre)
                 target.pattern, target.stash = bank[:length], bank[length:64]
                 target.lengths = [1 if cell is not None else 0 for cell in target.pattern]
                 target.lengths_stash = [1 if cell is not None else 0 for cell in target.stash]
@@ -1187,14 +1211,20 @@ class Engine:
         self.silence('drum')
         track = self.tracks['drum']
         if part == 'hats':
-            self._sync_lengths('drum')
+            self._refresh_hat_bank(track)
+            self.drum_muted['kick'] = False
+            return
+        if part == 'kick':
             length = len(track.pattern)
-            cells = patterns.randomize_genre_hats(track.pattern + track.stash,
-                                                   length, self.drum_genre)
-            cells = [[(n, random.randint(90, 127) if n in patterns.DRUM_PARTS['hats'] else v) for n, v in cell] if cell else None for cell in cells]
-            track.pattern, track.stash = cells[:length], cells[length:]
-            track.lengths = [1 if cell is not None else 0 for cell in track.pattern]
-            track.lengths_stash = [1 if cell is not None else 0 for cell in track.stash]
+            bank = track.pattern + track.stash
+            for i, cell in enumerate(bank):
+                hits = [(note, velocity) for note, velocity in (cell or []) if note != 36]
+                if i % 4 == 0:
+                    hits.append((36, 127))
+                bank[i] = hits or None
+            self._add_kick_fill(bank, length)
+            track.pattern, track.stash = bank[:length], bank[length:]
+            self._sync_lengths('drum')
             self.drum_muted['kick'] = False
             return
         for start in range(0, len(track.pattern), 16):
@@ -1465,8 +1495,15 @@ class Engine:
         shift = track.transpose + track.octave * 12
         for item in items:
             note, velocity = item if isinstance(item, tuple) else (item, 100)
-            if track.role == 'drum' and note == 36 and position % 16 in (0, 4, 8, 12):
-                velocity = 127
+            if track.role == 'drum' and note == 36:
+                # Short loops repeat their first cell; use elapsed step for the beat.
+                if step % 4 == 0:
+                    velocity = 127
+                elif not (step % 16 in (13, 14, 15) and
+                          position % 16 in (13, 14, 15) and velocity <= 75):
+                    continue
+            if track.role == 'drum' and note in (42, 46) and (42 in seen or 46 in seen):
+                continue
             if track.role == 'drum' and any(
                     self.drum_muted[part] and note in patterns.DRUM_PARTS[part] for part in PARTS):
                 continue
@@ -1483,8 +1520,9 @@ class Engine:
             return notes
         sounding = {note for note, _ in notes}
         candidates = [note for note, part in ((38, 'snare'), (37, 'rimshot'),
-                      (39, 'clap'), (41, 'toms'), (45, 'toms'), (42, 'hats'))
-                      if (self.ghost_on_muted or not self.drum_muted[part]) and note not in sounding]
+                      (39, 'clap'), (41, 'toms'), (45, 'toms'))
+                      if (self.ghost_on_muted or not self.drum_muted[part]) and note not in sounding
+                      and not (note in (42, 46) and (42 in sounding or 46 in sounding))]
         if candidates:
             notes.append((random.choice(candidates), random.randint(
                 max(1, self.ghost_velocity - 10), min(127, self.ghost_velocity + 10))))
@@ -1502,12 +1540,14 @@ class Engine:
         return [note for note, part in ((38, 'snare'), (37, 'rimshot'),
                 (39, 'clap'), (41, 'toms'), (45, 'toms'), (50, 'toms'),
                 (42, 'hats'), (46, 'hats'), (49, 'cymbals'))
-                if not self.drum_muted[part] and note not in sounding]
+                if not self.drum_muted[part] and note not in sounding
+                and not (note in (42, 46) and (42 in sounding or 46 in sounding))]
 
     def _kick_break_notes(self, base, index):
         notes = [(note, velocity) for note, velocity in base if note != 36]
         if index % 2 == 0:
-            candidates = self._available_drum_notes({note for note, _ in notes})
+            candidates = [note for note in self._available_drum_notes({note for note, _ in notes})
+                          if note not in (42, 46)]
             if candidates:
                 notes.append((random.choice(candidates), random.randint(45, 95)))
         return notes
