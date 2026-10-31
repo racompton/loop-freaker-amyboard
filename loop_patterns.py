@@ -455,9 +455,12 @@ MELODIC_RHYTHMS = {
 }
 
 
-def melodic_rhythm(genre, length):
+def melodic_rhythm(genre, length, style=None, density=50):
     """Choose a genre rhythm; one in four phrases gets a one-step edit."""
-    rhythm = random.choice(MELODIC_RHYTHMS.get(genre, MELODIC_RHYTHMS['HOUSE']))
+    options = MELODIC_RHYTHMS.get(genre, MELODIC_RHYTHMS['HOUSE'])
+    options = sorted(options, key=len)
+    lean = density + (25 if style in ('BUSY', 'WALKING') else -25 if style in ('MINIMAL', 'ROOTS') else 0)
+    rhythm = options[0] if random.randint(1, 100) > max(10, min(90, lean)) else options[-1]
     occupied = [step % 16 in rhythm for step in range(length)]
     if length > 1 and random.randint(1, 4) == 1:
         index = random.randint(1, length - 1)
@@ -474,7 +477,7 @@ def melodic_lead(scale, chords, length=16, style='MELODIC', density=50, shared=N
         common = [note for note in pool if note % 12 in shared]
         if common:
             pool = common
-    rhythm = melodic_rhythm(genre, length)
+    rhythm = melodic_rhythm(genre, length, style, density)
     pattern = []
     previous = random.choice(pool)
     for step in range(length):

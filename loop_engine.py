@@ -270,7 +270,7 @@ class Engine:
                         roots[i] = None
         if role == 'bass':
             roots = patterns.ARRANGER.get('chord_roots_16ths') or []
-            rhythm = patterns.melodic_rhythm(self.drum_genre, len(result))
+            rhythm = patterns.melodic_rhythm(self.drum_genre, len(result), self.bass_style, self.bass_density)
             scale_pcs = {n % 12 for n in self.scale}
             pool = [n for n in range(36, 56) if n % 12 in scale_pcs]
             previous = pool[0] if pool else 40
