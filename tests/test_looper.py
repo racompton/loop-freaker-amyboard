@@ -201,6 +201,23 @@ class SequencerTests(unittest.TestCase):
         self.assertEqual([n is None for n in original],
                          [n is None for n in self.e.tracks['lead'].pattern])
 
+    def test_global_randomize_audibility_with_locks_and_prepared_plan(self):
+        for method in ('direct', 'prepared'):
+            for role in ROLES:
+                self.e.tracks[role].muted = True
+                self.e.track_locks[role] = True
+            patterns_before = {r: self.e.tracks[r].pattern[:] for r in ROLES}
+            if method == 'direct':
+                self.e.randomize_all()
+            else:
+                result = {}
+                for _ in self.e.prepare_auto_steps(result):
+                    pass
+                self.e.apply_prepared_global(result['value'])
+            self.assertFalse(self.e.tracks['drum'].muted)
+            self.assertGreaterEqual(sum(not self.e.tracks[r].muted for r in ('lead', 'bass', 'chords')), 2)
+            self.assertEqual(patterns_before, {r: self.e.tracks[r].pattern for r in ROLES})
+
     def test_auto_plan_keeps_locked_roles_and_key(self):
         self.e.track_locks['lead'] = True
         self.e.preset_locks['bass'] = True
@@ -276,14 +293,15 @@ class SequencerTests(unittest.TestCase):
         self.e.set_cv_role(None)
         self.assertEqual(('cv', 1, 0), self.sink.events[-1])
 
-    def test_randomize_all_preserves_whole_drum_mute_and_generates_chords_first(self):
+    def test_randomize_all_unmutes_drum_and_generates_chords_first(self):
         self.e.tracks['drum'].muted = True
         with patch.object(loop_patterns, 'generate_pattern', wraps=loop_patterns.generate_pattern) as gen:
             self.e.randomize_all()
         generated_roles = [c.args[1] for c in gen.call_args_list]
         self.assertEqual(['chords', 'bass', 'drum'],
                          list(dict.fromkeys(generated_roles)))
-        self.assertTrue(self.e.tracks['drum'].muted)
+        self.assertFalse(self.e.tracks['drum'].muted)
+        self.assertGreaterEqual(sum(not self.e.tracks[r].muted for r in ('lead', 'bass', 'chords')), 2)
         self.assertEqual(4, len([x for x in self.sink.events if x[0] == 'preset']))
 
     def test_global_randomize_restarts_drum_effect_countdowns(self):
@@ -838,16 +856,16 @@ class MenuTests(unittest.TestCase):
         self.m = Menu(self.e)
 
     def test_order_actions_and_long_press_from_edit_goes_up(self):
-        self.assertEqual(['RANDOMIZE', 'SYNTH', 'BASS', 'CHORD', 'DRUMS', 'SAVE', 'LOAD', 'PERFORM', 'LOCKS', 'SETTINGS'], self.m.rows())
-        self.m.handle(1, delta=1)
+        self.assertEqual(['RANDOMIZE', 'PERFORM', 'LOCKS', 'SYNTH', 'BASS', 'CHORD', 'DRUMS', 'SAVE', 'LOAD', 'SETTINGS', 'PLAY / STOP'], self.m.rows())
+        self.m.handle(1, delta=self.m.rows().index('SYNTH'))
         self.m.handle(2, click=True)
         self.assertEqual(['RANDOMIZE', 'RANDOM NOTES', 'RANDOM PRESET', 'PRESET B1 P1', 'LOOP LENGTH', 'VARIATION', 'STYLE', 'DENSITY', 'DIRECTION', 'OCTAVE', '# of NOTES', 'MUTE'], self.m.rows())
         self.m.handle(3, delta=self.m.rows().index('OCTAVE'))
         self.m.handle(4, click=True)
         self.m.handle(5, delta=1)
-        self.assertEqual(1, self.e.tracks['lead'].octave)
+        self.assertEqual(3, self.e.tracks['lead'].transpose)
         self.m.handle(6, long_press=True)
-        self.assertEqual(('main', 1, False), (self.m.page, self.m.index, self.m.editing))
+        self.assertEqual(('main', 3, False), (self.m.page, self.m.index, self.m.editing))
 
     def test_settings_displays_version_as_read_only(self):
         from loop_ui import LOOPER_VERSION
@@ -856,6 +874,28 @@ class MenuTests(unittest.TestCase):
         self.m.handle(1, click=True)
         self.assertFalse(self.m.editing)
         self.assertEqual('settings', self.m.page)
+
+    def test_main_menu_play_stop_and_three_semitone_edits(self):
+        self.m.index = self.m.rows().index('PLAY / STOP')
+        self.e.start()
+        self.m.click(1)
+        self.assertFalse(self.e.playing)
+        self.m.click(2)
+        self.assertTrue(self.e.playing)
+        for role in ('lead', 'bass', 'chords'):
+            self.m.enter(role)
+            self.m.index = self.m.rows().index('OCTAVE')
+            track = self.e.tracks[role]
+            track.octave = 1  # existing saved sets retain octave units
+            track.transpose = 0
+            self.m.click(3)
+            self.m.adjust(1, 4)
+            self.assertEqual(3, track.transpose)
+            self.assertEqual('+15 SEMITONES', self.m.selected_value())
+            self.m.adjust(-2, 5)
+            self.assertEqual(-3, track.transpose)
+            self.assertEqual('+9 SEMITONES', self.m.selected_value())
+            self.m.back()
 
     def test_every_instrument_menu_starts_with_randomize(self):
         for role in ROLES:
@@ -1009,7 +1049,7 @@ class MenuTests(unittest.TestCase):
             store = Sets(directory)
             name = store.save(self.e.snapshot())
             self.m = Menu(self.e, set_store=store)
-            self.m.index = 6
+            self.m.index = self.m.rows().index('LOAD')
             self.m.click(1)
             self.assertEqual([name, 'DELETE...'], self.m.rows())
             self.m.click(2)
@@ -1187,7 +1227,7 @@ class MenuTests(unittest.TestCase):
         self.m.enter('settings')
         self.assertEqual(['MIDI CHANNELS', 'PRESET BANKS',
                           'CLOCK SOURCE', 'CV OUTPUT FROM', 'TEMPO', 'SWING', 'MIX',
-                          'AUTO PLAY', 'SCREENSAVER', 'PLAY / STOP',
+                          'AUTO PLAY', 'SCREENSAVER',
                           'VERSION ' + __import__('loop_ui').LOOPER_VERSION], self.m.rows())
 
     def test_performance_and_locks_menu_controls(self):

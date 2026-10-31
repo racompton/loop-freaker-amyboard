@@ -74,6 +74,12 @@ as soon as the button is released; a double-click acts as two ordinary clicks.
 
 ```text
 RANDOMIZE
+PERFORM
+  MUTE / UNMUTE for SYNTH / BASS / CHORD / DRUMS / KICK
+  VARIATION / DRUM ROLL / TEMPO / NEXT BAR
+LOCKS
+  KEY / SYNTH / BASS / CHORD / DRUMS
+  P SYNTH / P BASS / P CHORD / P DRUMS
 SYNTH
   RANDOMIZE
   RANDOM NOTES
@@ -129,12 +135,6 @@ LOAD
   DELETE...
     [SAVED SET NAMES]
       CANCEL / DELETE SET
-PERFORM
-  MUTE / UNMUTE for SYNTH / BASS / CHORD / DRUMS / KICK
-  VARIATION / DRUM ROLL / TEMPO / NEXT BAR
-LOCKS
-  KEY / SYNTH / BASS / CHORD / DRUMS
-  P SYNTH / P BASS / P CHORD / P DRUMS
 SETTINGS
   MIDI CHANNELS
     SYNTH / BASS / CHORD / DRUMS
@@ -149,8 +149,8 @@ SETTINGS
   MIX             ON / OFF (default ON)
   AUTO PLAY       OFF / ON (default OFF)
   SCREENSAVER    OFF / ON
-  PLAY / STOP
   VERSION         installed looper release (read-only)
+PLAY / STOP
 ```
 
 SYNTH favors chord tones on strong steps, moves mostly to nearby notes, and
@@ -228,6 +228,8 @@ PLAY. As in the
 original, random mutes can produce a quiet pattern; unmute tracks/parts as desired.
 It also shows a 640 ms static BAM! starburst. The OLED refreshes once for the
 picture and once to restore the menu.
+Main RANDOMIZE unmutes DRUMS and at least two melodic instruments, even if
+that requires unmuting a locked track; locks still preserve its pattern.
 Main RANDOMIZE also restarts the automatic drum-roll and 64-beat kick-breakdown
 countdowns and chooses a new 2–16 beat breakdown duration. DRUMS RANDOMIZE and
 RANDOM NOTES also choose a new breakdown duration and restart its countdown.
@@ -241,7 +243,8 @@ This follows [Mixed In Key's basic Camelot moves](https://mixedinkey.com/workflo
 Instrument RANDOM NOTES keeps the scale and preset. RANDOM PRESET keeps notes
 and mute state. Each melodic note-count detent adds or removes one occupied
 step, from one to the current loop length. Existing notes at other steps stay
-as they were; OCTAVE changes by 12 semitones.
+as they were; OCTAVE changes by three semitones per detent (one quarter octave),
+and displays the total pitch shift in semitones.
 The first item inside each instrument, RANDOMIZE, changes that instrument's
 notes, preset, style, density, and loop length, always unmutes it, and shows the BAM! starburst. DRUMS
 also randomizes its individual part mutes but always unmutes the kick.

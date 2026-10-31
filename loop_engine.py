@@ -830,8 +830,23 @@ class Engine:
             for part in PARTS:
                 self.drum_muted[part] = random.choice((True, False))
             self.drum_muted['kick'] = False
+        self._ensure_global_audible()
         if self.auto_play:
             self._ensure_auto_audible()
+
+    def _ensure_global_audible(self):
+        # Track locks keep their patterns; audibility takes priority for a global reset.
+        self.tracks['drum'].muted = False
+        self.drum_muted['kick'] = False
+        melodic = ('lead', 'bass', 'chords')
+        audible = sum(not self.tracks[role].muted for role in melodic)
+        candidates = [role for role in melodic if self.tracks[role].muted and not self.track_locks[role]]
+        locked = [role for role in melodic if self.tracks[role].muted and self.track_locks[role]]
+        while audible < 2:
+            choices = candidates if candidates else locked
+            role = choices.pop(random.randint(0, len(choices) - 1))
+            self.tracks[role].muted = False
+            audible += 1
 
     def _ensure_auto_audible(self, changed=None):
         if not self.auto_play:
@@ -1092,6 +1107,7 @@ class Engine:
                                   if self.drum_roll_beats else None)
         self.scale_name = plan['new_key']
         self.scale = patterns.SCALE_PRESETS[self.scale_name][:]
+        self._ensure_global_audible()
         if self.auto_play:
             self.auto_order = random.sample(ROLES, len(ROLES))
             self._choose_auto_pre_roll_parts()

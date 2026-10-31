@@ -6,7 +6,7 @@ from loop_settings import CLOCK_SOURCES
 import loop_patterns as patterns
 
 # Updated by tools/release_looper.py when a release is prepared.
-LOOPER_VERSION = '0.8.2'
+LOOPER_VERSION = '0.8.3'
 
 
 _SCALE_LABELS = {'Major': 'MAJ', 'Minor': 'MIN', 'Phrygian': 'PHR',
@@ -100,7 +100,7 @@ class Menu:
 
     def rows(self):
         if self.page == 'main':
-            return ['RANDOMIZE', 'SYNTH', 'BASS', 'CHORD', 'DRUMS', 'SAVE', 'LOAD', 'PERFORM', 'LOCKS', 'SETTINGS']
+            return ['RANDOMIZE', 'PERFORM', 'LOCKS', 'SYNTH', 'BASS', 'CHORD', 'DRUMS', 'SAVE', 'LOAD', 'SETTINGS', 'PLAY / STOP']
         if self.page in ROLES:
             track = self.engine.tracks[self.page]
             rows = ['RANDOMIZE', 'RANDOM NOTES', 'RANDOM PRESET',
@@ -126,7 +126,7 @@ class Menu:
         if self.page == 'settings':
             return ['MIDI CHANNELS', 'PRESET BANKS', 'CLOCK SOURCE',
                     'CV OUTPUT FROM', 'TEMPO', 'SWING', 'MIX', 'AUTO PLAY',
-                    'SCREENSAVER', 'PLAY / STOP', 'VERSION ' + LOOPER_VERSION]
+                    'SCREENSAVER', 'VERSION ' + LOOPER_VERSION]
         if self.page == 'perform':
             rows = [('UNMUTE ' if self.engine.tracks[r].muted else 'MUTE ') + NAMES[r]
                     for r in ROLES]
@@ -232,7 +232,7 @@ class Menu:
             if row == 'DIRECTION':
                 return self.direction_candidate if self.editing else e.tracks[self.page].direction
             if row == 'OCTAVE':
-                return '%+d' % e.tracks[self.page].octave
+                return '%+d SEMITONES' % (e.tracks[self.page].octave * 12 + e.tracks[self.page].transpose)
             if row == '# of NOTES':
                 return str(sum(n is not None for n in e.tracks[self.page].pattern))
             if row == 'CHORD SIZE':
@@ -352,7 +352,7 @@ class Menu:
             current = self.direction_candidate or e.tracks[self.page].direction
             self.direction_candidate = DIRECTIONS[(DIRECTIONS.index(current) + delta) % len(DIRECTIONS)]
         elif self.page in ROLES and row == 'OCTAVE':
-            e.set_octave(self.page, e.tracks[self.page].octave + delta)
+            e.set_transpose(self.page, e.tracks[self.page].transpose + 3 * delta)
         elif self.page in ROLES and row == '# of NOTES':
             e.edit_notes(self.page, delta)
         elif self.page == 'chords' and row == 'CHORD SIZE':
@@ -477,8 +477,10 @@ class Menu:
                 self.enter('perform')
             elif row == 'LOCKS':
                 self.enter('locks')
+            elif row == 'PLAY / STOP':
+                e.stop() if e.playing else e.start()
             else:
-                self.enter(ROLES[self.index - 1])
+                self.enter(next(role for role in ROLES if NAMES[role] == row))
         elif self.page in ROLES:
             if row == 'RANDOMIZE':
                 if e.randomize_track(self.page):
@@ -552,8 +554,6 @@ class Menu:
                 self.enter('channels')
             elif row == 'PRESET BANKS':
                 self.enter('banks')
-            elif row == 'PLAY / STOP':
-                e.stop() if e.playing else e.start()
             elif row.startswith('VERSION '):
                 pass
             else:
