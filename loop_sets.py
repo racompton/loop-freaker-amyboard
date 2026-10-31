@@ -107,6 +107,9 @@ def validate_set_steps(data):
                         (cell is None and length != 0)
                         for cell, length in zip(notes, lengths))):
                 raise ValueError('invalid ' + field)
+        slides = track.get('slides', [])
+        if not isinstance(slides, list) or any(not _integer(i, 0, 63) for i in slides):
+            raise ValueError('invalid slides')
         for cell in cells + stash:
             if cell is None:
                 continue

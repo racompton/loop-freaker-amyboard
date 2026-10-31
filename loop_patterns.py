@@ -445,8 +445,28 @@ def lead_remove_notes_inplace(pattern, count=None):
     for i in random.sample(note_idxs, k=k):
         pattern[i] = None
 
-def melodic_lead(scale, chords, length=16, style='MELODIC', density=50, shared=None):
-    """Create a short motif, repeat it and fit its strong notes to the chords."""
+# Original rhythms inspired by offbeat house, acid/techno, broken beats and electro.
+MELODIC_RHYTHMS = {
+    'HOUSE': ((0, 2, 6, 8, 10, 14), (0, 3, 6, 10, 14)),
+    'TECHNO': ((0, 3, 6, 8, 11, 14), (0, 2, 5, 7, 10, 13, 15)),
+    'BREAKS': ((0, 3, 6, 9, 12, 15), (0, 2, 7, 10, 14)),
+    'ELECTRO': ((0, 3, 6, 10, 12, 15), (0, 2, 5, 8, 11, 14)),
+    "DRUM'N'BASS": ((0, 3, 7, 10, 14), (0, 2, 6, 9, 12, 15)),
+}
+
+
+def melodic_rhythm(genre, length):
+    """Choose a genre rhythm; one in four phrases gets a one-step edit."""
+    rhythm = random.choice(MELODIC_RHYTHMS.get(genre, MELODIC_RHYTHMS['HOUSE']))
+    occupied = [step % 16 in rhythm for step in range(length)]
+    if length > 1 and random.randint(1, 4) == 1:
+        index = random.randint(1, length - 1)
+        occupied[index] = not occupied[index]
+    return occupied
+
+
+def melodic_lead(scale, chords, length=16, style='MELODIC', density=50, shared=None, genre='HOUSE'):
+    """Choose scale notes for an original genre rhythm with chord-tone anchors."""
     if not scale or length < 1:
         return []
     pool = sorted(set(scale))
@@ -454,46 +474,23 @@ def melodic_lead(scale, chords, length=16, style='MELODIC', density=50, shared=N
         common = [note for note in pool if note % 12 in shared]
         if common:
             pool = common
-    chance = max(0.1, min(0.9, density / 100.0))
-    chance *= 0.65 if style == 'MINIMAL' else 1.35 if style == 'BUSY' else 1.0
-    motif = []
+    rhythm = melodic_rhythm(genre, length)
     pattern = []
-    previous = pool[0]
-    chord_cache = {}
+    previous = random.choice(pool)
     for step in range(length):
-        pos = step % 8
-        repeat = step >= 8 and pos < len(motif)
-        template = motif[pos] if repeat else None
-        occupied = (template is not None if repeat else (step == 0 or random.random() < chance))
-        if repeat and pos == 7 and random.random() < 0.5:
-            occupied = not occupied
+        if not rhythm[step]:
+            pattern.append(None)
+            continue
         chord = chords[step % len(chords)] if chords else None
-        previous_chord = chords[(step - 1) % len(chords)] if chords and step else None
-        if step and chord and previous_chord and chord != previous_chord and random.random() < 0.35:
-            occupied = False  # leave room for the chord change
-        chord_key = tuple(chord) if chord else ()
-        if chord_key not in chord_cache:
-            tones = {note % 12 for note in chord_key}
-            chord_cache[chord_key] = [n for n in pool if n % 12 in tones]
-        if not occupied:
-            note = None
-        else:
-            candidates = pool
-            chord_pool = chord_cache[chord_key]
-            if chord_pool and (step % 4 == 0 or random.random() < 0.6):
-                candidates = chord_pool
-            if repeat and template is not None:
-                anchor = template
-            else:
-                anchor = previous
-            closest = min(abs(n - anchor) for n in candidates)
-            nearby = [n for n in candidates if abs(n - anchor) <= closest + 2]
-            note = random.choice(nearby)
-            previous = note
-        pattern.append(note)
-        if step < 8:
-            motif.append(note)
+        tones = {n % 12 for n in chord} if chord else set()
+        candidates = [n for n in pool if n % 12 in tones] if tones and step % 4 == 0 else pool
+        candidates = candidates or pool
+        distance = min(abs(n - previous) for n in candidates)
+        nearby = [n for n in candidates if abs(n - previous) <= distance + 3]
+        previous = random.choice(nearby)
+        pattern.append(previous)
     return pattern
+
 
 def generate_pattern(scale, role, scale_name=None, chord_size=4):
     if role == 'drum':

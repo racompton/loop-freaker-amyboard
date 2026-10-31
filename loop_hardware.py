@@ -8,6 +8,7 @@ from loop_preset_preferences import preset_number, PROGRAM_COUNTS
 class Outputs:
     def __init__(self):
         self.pending_programs = {}
+        self.slide_states = {}
         self.midi_uart = None
         # Firmware MIDI clock output can stall the AMYboard sequencer. Keep
         # transport in internal-clock mode and send F8 from our callback.
@@ -44,6 +45,11 @@ class Outputs:
 
     def transport(self, playing):
         self._midi(bytes((0xFA if playing else 0xFC,)))
+
+    def slide(self, track, enabled):
+        if self.slide_states.get(track.channel) != enabled:
+            self._midi(bytes((0xB0 | (track.channel - 1), 102, 127 if enabled else 0)))
+            self.slide_states[track.channel] = enabled
 
     def note_on(self, track, note, velocity):
         # Wait out the drum bank's 50ms settle time without blocking sequencing.

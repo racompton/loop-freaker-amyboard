@@ -261,7 +261,7 @@ class SequencerTests(unittest.TestCase):
         self.e.advance()
         self.e.release_drums()
         self.e.advance()
-        self.assertEqual(2, self.sink.events.count(('on', 10, 36, 100)))
+        self.assertEqual(2, self.sink.events.count(('on', 10, 36, 127)))
         self.assertNotIn(('on', 10, 41, 90), self.sink.events)
         self.assertEqual(2, self.sink.events.count(('cv', 1, 5)))
         self.assertIn(('cv', 1, 0), self.sink.events)
@@ -529,7 +529,7 @@ class SequencerTests(unittest.TestCase):
             self.e.step = 256 + offset
             self.sink.events.clear()
             self.e.advance()
-            self.assertIn(('on', 10, 36, 110), self.sink.events)
+            self.assertIn(('on', 10, 36, 127), self.sink.events)
         self.assertEqual([[(36, 110)]] * 16, track.pattern)
         self.assertEqual(4, self.e.snapshot()['break_duration_beats'])
 
@@ -558,7 +558,7 @@ class SequencerTests(unittest.TestCase):
         self.e.step = 160
         self.sink.events.clear()
         self.e.advance()
-        self.assertIn(('on', 10, 36, 110), self.sink.events)
+        self.assertIn(('on', 10, 36, 127), self.sink.events)
         self.assertEqual([[(36, 110)]] * 16, track.pattern)
 
     def test_genre_switch_replaces_drums_and_glides_tempo_for_sixty_four_beats(self):
@@ -779,7 +779,7 @@ class SequencerTests(unittest.TestCase):
         self.sink.events.clear()
         self.e.step = 384
         self.e.advance()
-        self.assertIn(('on', 10, 36, 100), self.sink.events)
+        self.assertIn(('on', 10, 36, 127), self.sink.events)
         self.assertNotIn(('on', 10, 38, 100), self.sink.events)
         self.assertNotIn(('on', 10, 39, 100), self.sink.events)
         self.assertEqual([(36, 100), (38, 100), (39, 100), (42, 100)], track.pattern[0])
@@ -1564,3 +1564,54 @@ class PresetPreferenceTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class GeneratedMusicTests(unittest.TestCase):
+    def test_rhythm_is_unmodified_or_one_toggle(self):
+        for genre, choices in loop_patterns.MELODIC_RHYTHMS.items():
+            for _ in range(100):
+                rhythm = loop_patterns.melodic_rhythm(genre, 16)
+                distances = [sum(rhythm[i] != (i in template) for i in range(16)) for template in choices]
+                self.assertLessEqual(min(distances), 1)
+
+    def test_drums_velocities_and_fill_distribution(self):
+        engine = Engine(Sink(), generate=False)
+        filled = 0
+        for _ in range(400):
+            bar = engine._generate_drums(16)
+            quiet = []
+            for i, cell in enumerate(bar):
+                for note, velocity in cell or []:
+                    if note == 36 and i in (0, 4, 8, 12):
+                        self.assertEqual(127, velocity)
+                    elif velocity < 90:
+                        quiet.append((i, velocity))
+                    else:
+                        self.assertLessEqual(velocity, 127)
+            self.assertLessEqual(len(quiet), 1)
+            if quiet:
+                self.assertIn(quiet[0][0], (13, 14, 15))
+                filled += 1
+        self.assertTrue(65 < filled < 135, filled)
+
+    def test_slides_persist_and_send_overlap(self):
+        class SlideSink(Sink):
+            def slide(self, track, enabled):
+                self.events.append(('slide', track.channel, enabled))
+        sink = SlideSink()
+        engine = Engine(sink, generate=False)
+        for track in engine.tracks.values():
+            track.pattern = [None, None]
+            track.lengths = [0, 0]
+            track.muted = True
+        lead = engine.tracks['lead']
+        lead.pattern, lead.lengths, lead.slides, lead.muted = [60, 62], [1, 1], [1], False
+        saved = engine.snapshot()
+        validate_set(saved)
+        engine._restore_track('lead', saved['tracks']['lead'])
+        self.assertEqual([1], lead.slides)
+        engine.start()
+        engine.advance()
+        sink.events.clear()
+        engine.advance()
+        self.assertIn(('slide', lead.channel, True), sink.events)
+        self.assertLess(sink.events.index(('on', lead.channel, 62, 100)), sink.events.index(('off', lead.channel, 60)))

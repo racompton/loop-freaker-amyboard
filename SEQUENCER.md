@@ -453,3 +453,19 @@ Before relying on the port for performance, verify on your board:
 Firmware compatibility has been checked on a connected AMYboard, but DAC
 calibration, audio quality and processor headroom still require physical
 measurement.
+
+### Musical phrases and TB-3 slides
+
+SYNTH and BASS choose original 16-step rhythmic motifs inspired by the selected
+drum genre and fit pitches to the active scale, with chord tones emphasized on
+strong beats. One quarter of phrases receive a one-step rhythmic variation.
+Generated SYNTH phrases can include slide transitions; their positions are saved
+with the set and survive loop resizing. On a slide, the looper sends TB-3 CC 102
+and overlaps the incoming and outgoing MIDI notes. The TB-3 needs firmware 1.10
+or later for CC 102; confirm the sound and slide response on the instrument.
+
+New drum loops have a one-in-four chance of one quieter extra hit on step 14,
+15, or 16 of an available bar. Loops shorter than 14 steps have no such step.
+Ordinary generated drum hits use velocities 90–127; kick hits on steps 1, 5,
+9 and 13 use 127, the MIDI maximum. The quieter fill, configurable ghost notes,
+breaks and rolls retain their own dynamics.
