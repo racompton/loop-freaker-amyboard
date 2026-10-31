@@ -849,6 +849,14 @@ class MenuTests(unittest.TestCase):
         self.m.handle(6, long_press=True)
         self.assertEqual(('main', 1, False), (self.m.page, self.m.index, self.m.editing))
 
+    def test_settings_displays_version_as_read_only(self):
+        from loop_ui import LOOPER_VERSION
+        self.m.enter('settings')
+        self.m.index = self.m.rows().index('VERSION ' + LOOPER_VERSION)
+        self.m.handle(1, click=True)
+        self.assertFalse(self.m.editing)
+        self.assertEqual('settings', self.m.page)
+
     def test_every_instrument_menu_starts_with_randomize(self):
         for role in ROLES:
             self.m.enter(role)
@@ -1179,7 +1187,8 @@ class MenuTests(unittest.TestCase):
         self.m.enter('settings')
         self.assertEqual(['MIDI CHANNELS', 'PRESET BANKS',
                           'CLOCK SOURCE', 'CV OUTPUT FROM', 'TEMPO', 'SWING', 'MIX',
-                          'AUTO PLAY', 'SCREENSAVER', 'PLAY / STOP'], self.m.rows())
+                          'AUTO PLAY', 'SCREENSAVER', 'PLAY / STOP',
+                          'VERSION ' + __import__('loop_ui').LOOPER_VERSION], self.m.rows())
 
     def test_performance_and_locks_menu_controls(self):
         self.m.enter('perform')

@@ -150,6 +150,7 @@ SETTINGS
   AUTO PLAY       OFF / ON (default OFF)
   SCREENSAVER    OFF / ON
   PLAY / STOP
+  VERSION         installed looper release (read-only)
 ```
 
 SYNTH favors chord tones on strong steps, moves mostly to nearby notes, and

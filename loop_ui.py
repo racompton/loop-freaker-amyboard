@@ -5,6 +5,9 @@ from loop_preset_preferences import preset_number
 from loop_settings import CLOCK_SOURCES
 import loop_patterns as patterns
 
+# Updated by tools/release_looper.py when a release is prepared.
+LOOPER_VERSION = '0.8.2'
+
 
 _SCALE_LABELS = {'Major': 'MAJ', 'Minor': 'MIN', 'Phrygian': 'PHR',
                  'Pentatonic': 'PENT', 'Blues': 'BLU', 'Dorian': 'DOR',
@@ -123,7 +126,7 @@ class Menu:
         if self.page == 'settings':
             return ['MIDI CHANNELS', 'PRESET BANKS', 'CLOCK SOURCE',
                     'CV OUTPUT FROM', 'TEMPO', 'SWING', 'MIX', 'AUTO PLAY',
-                    'SCREENSAVER', 'PLAY / STOP']
+                    'SCREENSAVER', 'PLAY / STOP', 'VERSION ' + LOOPER_VERSION]
         if self.page == 'perform':
             rows = [('UNMUTE ' if self.engine.tracks[r].muted else 'MUTE ') + NAMES[r]
                     for r in ROLES]
@@ -551,6 +554,8 @@ class Menu:
                 self.enter('banks')
             elif row == 'PLAY / STOP':
                 e.stop() if e.playing else e.start()
+            elif row.startswith('VERSION '):
+                pass
             else:
                 self.editing = True
                 if row == 'CLOCK SOURCE':
