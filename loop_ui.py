@@ -6,7 +6,7 @@ from loop_settings import CLOCK_SOURCES
 import loop_patterns as patterns
 
 # Updated by tools/release_looper.py when a release is prepared.
-LOOPER_VERSION = '0.9.0'
+LOOPER_VERSION = '0.9.1'
 
 
 _SCALE_LABELS = {'Major': 'MAJ', 'Minor': 'MIN', 'Phrygian': 'PHR',
@@ -669,7 +669,9 @@ class Menu:
             if self.editing:
                 self.adjust(delta, now)
             else:
-                self.index = (self.index + delta) % len(self.rows())
+                rows = self.rows()
+                if rows:
+                    self.index = clamp(self.index + delta, 0, len(rows) - 1)
         if self.notice and self.diff(now, self.notice_at) >= 1100:
             self.notice = ''
             self.dirty = True

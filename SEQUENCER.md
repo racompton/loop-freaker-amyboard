@@ -64,7 +64,7 @@ For code updates, reset after uploading all modules, or call
 
 ## Controls
 
-Rotate to select a row. Click to run an action or enter value editing; an asterisk
+Rotate to select a row; scrolling stops at the first and last rows. Click to run an action or enter value editing; an asterisk
 marks editing. Rotate to change the value, then click to finish. Hold for 650 ms
 to go up one menu level, including when editing. While editing a MIDI channel,
 occupied channels display `IN USE` but can be scrolled past; clicking one is

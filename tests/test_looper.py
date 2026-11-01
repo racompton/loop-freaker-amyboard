@@ -927,6 +927,18 @@ class MenuTests(unittest.TestCase):
         self.m.handle(6, long_press=True)
         self.assertEqual(('main', 3, False), (self.m.page, self.m.index, self.m.editing))
 
+    def test_menu_navigation_stops_at_both_ends(self):
+        for page in ('main', 'settings', 'lead', 'drum', 'perform', 'locks'):
+            self.m.page, self.m.index, self.m.editing = page, 0, False
+            self.m.handle(1, delta=-10)
+            self.assertEqual(0, self.m.index)
+            self.m.handle(2, delta=100)
+            self.assertEqual(len(self.m.rows()) - 1, self.m.index)
+            self.m.handle(3, delta=1)
+            self.assertEqual(len(self.m.rows()) - 1, self.m.index)
+            self.m.handle(4, delta=-100)
+            self.assertEqual(0, self.m.index)
+
     def test_settings_displays_version_as_read_only(self):
         from loop_ui import LOOPER_VERSION
         self.m.enter('settings')
