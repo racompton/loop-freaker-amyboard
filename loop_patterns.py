@@ -360,20 +360,26 @@ HAT_GROOVES = {
 }
 
 
-def randomize_genre_hats(cells, visible_length, genre):
+def randomize_genre_hats(cells, visible_length, genre, quarter=False):
     """Repeat one genre-inspired four- or eight-step hat motif across the bank."""
     if genre not in HAT_GROOVES:
         raise ValueError('unknown drum genre')
-    closed, opened = random.choice(HAT_GROOVES[genre])
-    size = random.choice((4, 8))
-    motif = []
-    for step in range(size):
-        note = 42 if step in closed else 46 if step in opened else None
-        motif.append((note, random.randint(90, 127)) if note is not None else None)
-    # Very short visible loops must still contain a hat; keep the motif periodic.
-    visible = min(size, visible_length)
-    if visible and not any(motif[:visible]):
-        motif[0] = (42, random.randint(90, 127))
+    if quarter:
+        # Four distinct beat accents repeat as a 16-step phrase.
+        velocities = random.sample(range(90, 128), 4)
+        motif = [(42, velocities[step // 4]) if step % 4 == 0 else None
+                 for step in range(16)]
+        size = 16
+    else:
+        closed, opened = random.choice(HAT_GROOVES[genre])
+        size = random.choice((4, 8))
+        motif = []
+        for step in range(size):
+            note = 42 if step in closed else 46 if step in opened else None
+            motif.append((note, random.randint(90, 127)) if note is not None else None)
+        visible = min(size, visible_length)
+        if visible and not any(motif[:visible]):
+            motif[0] = (42, random.randint(90, 127))
     result = []
     for i, cell in enumerate(cells):
         hits = [(note, velocity) for note, velocity in (cell or [])

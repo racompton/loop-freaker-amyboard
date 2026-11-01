@@ -168,7 +168,9 @@ change the genre or tempo. DENSITY controls each instrument independently.
 
 DRUMS → DRUM PARTS → HATS → RANDOM NOTES chooses a recognizable closed/open
 four- or eight-step hat motif inspired by the selected genre and repeats it
-across the fixed note bank. Open and closed hats never share a step.
+across the fixed note bank. One quarter of generated hat patterns instead use
+closed hats on each quarter-note beat, with four distinct velocities repeating
+every bar. Open and closed hats never share a step.
 It preserves other drum parts and the hats' mute state. A very short loop is
 guaranteed at least one hat hit; widening it reveals the same generated tail.
 
@@ -364,6 +366,12 @@ muted; toms, rimshot, and cymbals begin muted. Muted loops continue advancing in
 time with the other tracks. Chords are generated before bass so bass uses the
 new progression rather than stale roots. Consecutive identical drum hits retrigger;
 identical melodic/chord steps sustain, as in the desktop script.
+
+For every genre, newly generated drum loops choose snare or clap with equal
+probability for the backbeat on steps 5 and 13. The choice is held for the whole
+loop and the chosen drum part is unmuted. An explicit later mute or manual
+snare/clap part randomization remains available. These bar accents and the
+quarter-note hat option keep their timing even in very short loops.
 
 DRUMS adds occasional ghost hits at the configured velocity on eighth-note offbeats
 during ordinary playback. A 2–16 beat kick break is chosen once for the set;

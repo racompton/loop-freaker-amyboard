@@ -40,6 +40,8 @@ class Track:
         self.lengths = []  # melodic note duration in sixteenth-note steps
         self.lengths_stash = []
         self.slides = []  # incoming lead step indices, including hidden steps
+        self.hat_beat_only = False
+        self.backbeat_note = None
         self.direction = 'FORWARD'
         self.random_cycle = None
         self.random_order = []
@@ -163,6 +165,7 @@ class Engine:
             self._fill_hidden_tail(role, generated if role == 'lead' else None)
             if role == 'drum':
                 self._refresh_hat_bank(self.tracks[role])
+                self._refresh_backbeat(self.tracks[role])
         if not skip_locked or not self.track_locks['lead']:
             self._make_slides()
 
@@ -329,10 +332,29 @@ class Engine:
 
     def _refresh_hat_bank(self, track):
         length = len(track.pattern)
-        cells = patterns.randomize_genre_hats(track.pattern + track.stash, length, self.drum_genre)
+        track.hat_beat_only = random.randint(1, 4) == 1
+        cells = patterns.randomize_genre_hats(track.pattern + track.stash, length, self.drum_genre, track.hat_beat_only)
         track.pattern, track.stash = cells[:length], cells[length:]
         track.lengths = [1 if cell is not None else 0 for cell in track.pattern]
         track.lengths_stash = [1 if cell is not None else 0 for cell in track.stash]
+
+    def _refresh_backbeat(self, track):
+        # Choose once for the complete 64-step bank, including hidden steps.
+        track.backbeat_note = random.choice((38, 39))
+        length = len(track.pattern)
+        bank = track.pattern + track.stash
+        for i in range(len(bank)):
+            if i % 16 in (4, 12):
+                hits = [(n, v) for n, v in (bank[i] or []) if n not in (38, 39)]
+                hits.append((track.backbeat_note, random.randint(90, 127)))
+                bank[i] = hits
+        track.pattern, track.stash = bank[:length], bank[length:]
+        track.lengths = [1 if cell is not None else 0 for cell in track.pattern]
+        track.lengths_stash = [1 if cell is not None else 0 for cell in track.stash]
+
+    def _ensure_backbeat_audible(self, track):
+        if track.backbeat_note in (38, 39):
+            self.drum_muted['snare' if track.backbeat_note == 38 else 'clap'] = False
 
     def _make_slides(self):
         track = self.tracks['lead']
@@ -703,6 +725,8 @@ class Engine:
         self.tracks['drum'].lengths_stash = []
         self._fill_hidden_tail('drum')
         self._refresh_hat_bank(self.tracks['drum'])
+        self._refresh_backbeat(self.tracks['drum'])
+        self._ensure_backbeat_audible(self.tracks['drum'])
         self.tempo_start_bpm = self.bpm
         self.tempo_target_bpm = patterns.DRUM_TEMPOS[genre]
         if self.playing and self.tempo_target_bpm != self.bpm:
@@ -766,6 +790,8 @@ class Engine:
         self._fill_hidden_tail(role, lead_motif)
         if role == 'drum':
             self._refresh_hat_bank(self.tracks[role])
+            self._refresh_backbeat(self.tracks[role])
+            self._ensure_backbeat_audible(self.tracks[role])
         self._maybe_randomize_lengths(role)
         if role == 'lead':
             self._make_slides()
@@ -852,6 +878,7 @@ class Engine:
             for part in PARTS:
                 self.drum_muted[part] = random.choice((True, False))
             self.drum_muted['kick'] = False
+            self._ensure_backbeat_audible(self.tracks['drum'])
         self._ensure_global_audible()
         if self.auto_play:
             self._ensure_auto_audible()
@@ -1002,6 +1029,8 @@ class Engine:
                 target.lengths = current.lengths[:]
                 target.lengths_stash = current.lengths_stash[:]
                 target.slides = current.slides[:]
+                target.hat_beat_only = current.hat_beat_only
+                target.backbeat_note = current.backbeat_note
                 target.muted = current.muted
                 if role == 'chords':
                     roots = patterns.ARRANGER['chord_roots_16ths'][:]
@@ -1019,8 +1048,10 @@ class Engine:
                     yield
                 staged._add_drum_fill(bank, length)
                 staged._add_kick_fill(bank, length)
-                bank = patterns.randomize_genre_hats(bank, length, staged.drum_genre)
+                target.hat_beat_only = random.randint(1, 4) == 1
+                bank = patterns.randomize_genre_hats(bank, length, staged.drum_genre, target.hat_beat_only)
                 target.pattern, target.stash = bank[:length], bank[length:64]
+                staged._refresh_backbeat(target)
                 target.lengths = [1 if cell is not None else 0 for cell in target.pattern]
                 target.lengths_stash = [1 if cell is not None else 0 for cell in target.stash]
                 staged._randomize_breakdown()
@@ -1066,6 +1097,7 @@ class Engine:
                 for part in PARTS:
                     staged.drum_muted[part] = random.choice((True, False))
                 staged.drum_muted['kick'] = False
+                staged._ensure_backbeat_audible(target)
             yield
         melodic = ('lead', 'bass', 'chords')
         audible = sum(not staged.tracks[role].muted for role in melodic)
@@ -1193,6 +1225,7 @@ class Engine:
             for part in PARTS:
                 self.drum_muted[part] = random.choice((True, False))
             self.drum_muted['kick'] = False
+            self._ensure_backbeat_audible(track)
         return True
 
     def toggle_mute(self, role):
@@ -1227,6 +1260,8 @@ class Engine:
             self._sync_lengths('drum')
             self.drum_muted['kick'] = False
             return
+        if part in ('snare', 'clap'):
+            track.backbeat_note = None  # manual part editing takes precedence
         for start in range(0, len(track.pattern), 16):
             bar = track.pattern[start:start+16]
             while len(bar) < 16:
@@ -1256,6 +1291,8 @@ class Engine:
                 'lengths': t.lengths[:],
                 'lengths_stash': t.lengths_stash[:],
                 'slides': t.slides[:],
+                'hat_beat_only': t.hat_beat_only,
+                'backbeat_note': t.backbeat_note,
             }
             yield
         result['value'] = {
@@ -1324,6 +1361,8 @@ class Engine:
             t.bank = clamp(t.bank, 0, len(counts) - 1)
             t.program = clamp(t.program, 0, counts[t.bank] - 1)
         t.slides = source.get('slides', [])[:]
+        t.hat_beat_only = source.get('hat_beat_only', False)
+        t.backbeat_note = source.get('backbeat_note')
         t.direction = source.get('direction', 'FORWARD')
         t.random_cycle = None
         t.random_order = []
@@ -1474,9 +1513,25 @@ class Engine:
                     if track.lengths[previous] > distance:
                         cell = prior
                     break
-        if cell is None:
-            return []
-        items = cell if isinstance(cell, list) else [cell]
+        if (track.role == 'drum' and (cell is None or isinstance(cell, list)) and
+                (track.hat_beat_only or track.backbeat_note is not None)):
+            # These bar-length accents remain on the beat even in a one-step loop.
+            items = list(cell or [])
+            index = step % 16
+            stored = (track.pattern[index] if index < len(track.pattern) else
+                      track.stash[index - len(track.pattern)] if index - len(track.pattern) < len(track.stash) else None)
+            if track.hat_beat_only:
+                items = [item for item in items if item[0] not in (42, 46)]
+                if step % 4 == 0 and isinstance(stored, list):
+                    items.extend(item for item in stored if item[0] == 42)
+            if track.backbeat_note is not None and step % 16 in (4, 12):
+                items = [item for item in items if item[0] not in (38, 39)]
+                if isinstance(stored, list):
+                    items.extend(item for item in stored if item[0] == track.backbeat_note)
+        else:
+            if cell is None:
+                return []
+            items = cell if isinstance(cell, list) else [cell]
         if track.role == 'chords' and self.chord_style == 'HIT' and step > 0:
             cycle = (max(1, len(track.pattern) * 2 - 2) if track.direction == 'PING PONG'
                      else len(track.pattern))

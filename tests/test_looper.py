@@ -347,7 +347,9 @@ class SequencerTests(unittest.TestCase):
                 self.assertTrue(any(event[0] == 'preset' and event[1] == channel
                                     for event in self.sink.events))
         self.assertFalse(self.e.drum_muted['kick'])
-        self.assertTrue(all(self.e.drum_muted[part] for part in self.e.drum_muted if part != 'kick'))
+        selected = 'snare' if self.e.tracks['drum'].backbeat_note == 38 else 'clap'
+        self.assertFalse(self.e.drum_muted[selected])
+        self.assertTrue(all(self.e.drum_muted[part] for part in self.e.drum_muted if part not in ('kick', selected)))
 
     def test_randomize_only_uses_adjacent_camelot_keys(self):
         self.assertEqual({'C Major', 'F Major', 'G Major', 'A Minor'},
@@ -1674,7 +1676,8 @@ class GeneratedMusicTests(unittest.TestCase):
             engine.randomize_notes('drum')
             bank = engine.tracks['drum'].pattern + engine.tracks['drum'].stash
             hats = [tuple(hit for hit in cell or [] if hit[0] in (42, 46)) for cell in bank]
-            self.assertEqual(hats[:8] * 8, hats)
+            period = 16 if engine.tracks['drum'].hat_beat_only else 8
+            self.assertEqual(hats[:period] * (64 // period), hats)
             self.assertTrue(all(len(step) <= 1 for step in hats))
         result = {}
         for _ in engine.prepare_auto_steps(result):
@@ -1682,7 +1685,62 @@ class GeneratedMusicTests(unittest.TestCase):
         track = result['value']['saved']['tracks']['drum']
         bank = track['pattern'] + track['stash']
         hats = [tuple(tuple(hit) for hit in cell or [] if hit[0] in (42, 46)) for cell in bank]
-        self.assertEqual(hats[:8] * 8, hats)
+        period = 16 if track['hat_beat_only'] else 8
+        self.assertEqual(hats[:period] * (64 // period), hats)
+
+    def test_backbeat_distribution_all_genres_and_staged_mutes(self):
+        random.seed(20261101)
+        engine = Engine(Sink())
+        for genre in loop_patterns.DRUM_GENRES:
+            engine.drum_genre = genre
+            choices = []
+            for _ in range(100):
+                engine.randomize_notes('drum')
+                track = engine.tracks['drum']
+                choices.append(track.backbeat_note)
+                bank = track.pattern + track.stash
+                for i in (4, 12, 20, 28, 36, 44, 52, 60):
+                    self.assertEqual([track.backbeat_note], [n for n, _ in bank[i] or [] if n in (38, 39)])
+                self.assertFalse(engine.drum_muted['snare' if track.backbeat_note == 38 else 'clap'])
+            self.assertTrue(30 < choices.count(38) < 70)
+        result = {}
+        for _ in engine.prepare_auto_steps(result):
+            pass
+        saved = result['value']['saved']
+        selected = saved['tracks']['drum']['backbeat_note']
+        self.assertFalse(saved['drum_muted']['snare' if selected == 38 else 'clap'])
+
+    def test_quarter_hat_mode_is_selected_one_quarter_of_the_time(self):
+        random.seed(20261102)
+        engine = Engine(Sink())
+        track = engine.tracks['drum']
+        selected = 0
+        for _ in range(400):
+            engine._refresh_hat_bank(track)
+            selected += int(track.hat_beat_only)
+        self.assertTrue(65 < selected < 135, selected)
+
+    def test_quarter_hats_and_backbeat_survive_short_loops_and_save(self):
+        engine = Engine(Sink())
+        track = engine.tracks['drum']
+        track.pattern, track.stash = [None], [None] * 63
+        with patch.object(loop_random, 'randint', return_value=1):
+            engine._refresh_hat_bank(track)
+        engine._refresh_backbeat(track)
+        engine._ensure_backbeat_audible(track)
+        track.muted = False
+        engine.drum_muted['hats'] = False
+        saved = engine.snapshot()
+        validate_set(saved)
+        engine._restore_track('drum', saved['tracks']['drum'])
+        for step in range(32):
+            hits = engine.notes_at(track, step)
+            self.assertEqual(step % 4 == 0, any(n == 42 for n, _ in hits))
+            self.assertFalse(any(n == 46 for n, _ in hits))
+            self.assertEqual(step % 16 in (4, 12), any(n == track.backbeat_note for n, _ in hits))
+        velocities = [dict(engine.notes_at(track, step))[42] for step in (0, 4, 8, 12)]
+        self.assertEqual(4, len(set(velocities)))
+        self.assertEqual(velocities, [dict(engine.notes_at(track, step))[42] for step in (16, 20, 24, 28)])
 
     def test_slides_persist_and_send_overlap(self):
         class SlideSink(Sink):

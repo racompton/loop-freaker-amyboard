@@ -107,6 +107,8 @@ def validate_set_steps(data):
                         (cell is None and length != 0)
                         for cell, length in zip(notes, lengths))):
                 raise ValueError('invalid ' + field)
+        if type(track.get('hat_beat_only', False)) is not bool or track.get('backbeat_note') not in (None, 38, 39):
+            raise ValueError('invalid drum accents')
         slides = track.get('slides', [])
         if not isinstance(slides, list) or any(not _integer(i, 0, 63) for i in slides):
             raise ValueError('invalid slides')

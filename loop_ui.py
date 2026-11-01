@@ -6,7 +6,7 @@ from loop_settings import CLOCK_SOURCES
 import loop_patterns as patterns
 
 # Updated by tools/release_looper.py when a release is prepared.
-LOOPER_VERSION = '0.8.5'
+LOOPER_VERSION = '0.8.6'
 
 
 _SCALE_LABELS = {'Major': 'MAJ', 'Minor': 'MIN', 'Phrygian': 'PHR',
