@@ -259,9 +259,12 @@ durations will vary; each held note ends by the next note in that track.
 CHORD SIZE changes the number of simultaneous pitches in each sounding chord
 immediately, and the choice is retained through note randomization and saved
 sets. Old saved sets without this field load with the four-note default.
-Each LOOP LENGTH detent halves or doubles that instrument's loop, between 1 and
-64 sixteenth notes. Randomization chooses a fixed 64-step note bank;
-shortening hides its tail and lengthening reveals the same notes and hits.
+Each LOOP LENGTH detent halves or doubles the loop. SYNTH, BASS and DRUMS
+range from 1 to 64 sixteenth notes; CHORD ranges from 16 to 256, with HOLD
+below 16. HOLD sustains the current chord until the track is muted, stopped,
+replaced, or taken out of HOLD. It is independent of CHORD STYLE.
+Shortening hides the tail, and lengthening reveals the same notes and hits;
+new chord steps are generated only when first needed.
 The hidden tail is saved with the set. Older sets generate any missing tail
 once on their first extension. Turn DIRECTION to preview and click to apply.
 DIRECTION changes melodic playback order:

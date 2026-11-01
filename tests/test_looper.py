@@ -342,7 +342,7 @@ class SequencerTests(unittest.TestCase):
                 self.sink.events.clear()
                 self.e.randomize_track(role)
                 self.assertFalse(track.muted)
-                self.assertIn(len(track.pattern), (1, 2, 4, 8, 16, 32, 64))
+                self.assertIn(len(track.pattern), (16, 32, 64, 128, 256) if role == 'chords' else (1, 2, 4, 8, 16, 32, 64))
                 self.assertEqual((channel, octave), (track.channel, track.octave))
                 self.assertTrue(any(event[0] == 'preset' and event[1] == channel
                                     for event in self.sink.events))
@@ -446,7 +446,7 @@ class SequencerTests(unittest.TestCase):
             'drum': [[(36, 100), (38, 80)] for _ in range(16)],
         }
         loop_patterns.ARRANGER['chord_roots_16ths'] = [36] * 16
-        for role in ROLES:
+        for role in ('lead', 'bass', 'drum'):
             track = self.e.tracks[role]
             track.pattern = originals[role][:]
             self.e.set_loop_length(role, -4)
@@ -463,7 +463,7 @@ class SequencerTests(unittest.TestCase):
         validate_set(self.e.snapshot())
 
     def test_length_changes_only_reveal_the_fixed_hidden_pattern(self):
-        for role in ROLES:
+        for role in ('lead', 'bass', 'drum'):
             self.e.randomize_notes(role)
             track = self.e.tracks[role]
             original = self.e.snapshot()['tracks'][role]
@@ -475,6 +475,64 @@ class SequencerTests(unittest.TestCase):
             self.assertEqual(original['pattern'] + original['stash'],
                              self.e.snapshot()['tracks'][role]['pattern'] +
                              self.e.snapshot()['tracks'][role]['stash'])
+
+    def test_chord_length_hold_and_long_pattern_round_trip(self):
+        track = self.e.tracks['chords']
+        track.pattern = [[60, 64, 67]] * 16
+        track.stash = []
+        track.lengths = [1] * 16
+        track.lengths_stash = []
+        loop_patterns.ARRANGER['chord_roots_16ths'] = [36] * 16
+        self.e.chord_roots_stash = []
+        track.muted = False
+        self.e.chord_style = 'STACCATO'
+        self.e.advance()
+        self.sink.events.clear()
+        self.e.set_loop_length('chords', -1)
+        self.assertTrue(track.chord_hold)
+        self.assertEqual([60, 64, 67], track.held_chord)
+        self.e.advance()
+        self.sink.events.clear()
+        for _ in range(20):
+            self.e.release_drums()
+            self.e.advance()
+        self.assertFalse(any(event[0] in ('on', 'off') and event[1] == track.channel for event in self.sink.events))
+        held = self.e.snapshot()
+        validate_set(held)
+        self.e._restore_track('chords', held['tracks']['chords'])
+        self.assertTrue(track.chord_hold)
+        self.assertEqual([60, 64, 67], track.held_chord)
+        self.e.set_loop_length('chords', 1)
+        self.assertFalse(track.chord_hold)
+        self.assertEqual(16, len(track.pattern))
+        self.e.set_loop_length('chords', 4)
+        self.assertEqual(256, len(track.pattern))
+        original = self.e.snapshot()
+        validate_set(original)
+        self.assertEqual(256, len(original['chord_roots']))
+        self.e.set_loop_length('chords', -4)
+        self.assertEqual(16, len(track.pattern))
+        self.e.set_loop_length('chords', 4)
+        self.assertEqual(original['tracks']['chords']['pattern'], self.e.snapshot()['tracks']['chords']['pattern'])
+        self.e._apply_saved('TEST', original)
+        self.assertEqual(256, len(track.pattern))
+        self.assertEqual(original['tracks']['chords']['pattern'], self.e.snapshot()['tracks']['chords']['pattern'])
+
+    def test_staged_randomization_builds_and_restores_256_chord_steps(self):
+        choose = self.e._randomize_character
+        def length(role):
+            return 256 if role == 'chords' else choose(role)
+        result = {}
+        with patch.object(Engine, '_randomize_character', side_effect=lambda role: length(role)):
+            # Bound method is patched for both live and staged engines.
+            for _ in self.e.prepare_auto_steps(result):
+                pass
+        saved = result['value']['saved']
+        self.assertEqual(256, len(saved['tracks']['chords']['pattern']))
+        self.assertEqual(256, len(saved['chord_roots']))
+        validate_set(saved)
+        self.e.apply_prepared_global(result['value'])
+        self.assertEqual(256, len(self.e.tracks['chords'].pattern))
 
     def test_melodic_playback_directions_and_random_cycle(self):
         track = self.e.tracks['lead']

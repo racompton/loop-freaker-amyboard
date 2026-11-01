@@ -94,19 +94,23 @@ def validate_set_steps(data):
             raise ValueError('invalid direction')
         channels.append(track['channel'])
         cells = track.get('pattern')
-        if not isinstance(cells, list) or len(cells) not in (1, 2, 4, 8, 16, 32, 64, 128):
+        if not isinstance(cells, list) or len(cells) not in (1, 2, 4, 8, 16, 32, 64, 128, 256) or (len(cells) == 256 and role != 'chords'):
             raise ValueError('invalid loop length')
         stash = track.get('stash', [])
-        if not isinstance(stash, list) or len(stash) > max(0, 64 - len(cells)):
+        if not isinstance(stash, list) or len(stash) > max(0, (256 if role == 'chords' else 64) - len(cells)):
             raise ValueError('invalid hidden loop')
         for notes, lengths, field in ((cells, track.get('lengths'), 'lengths'),
                                       (stash, track.get('lengths_stash'), 'hidden lengths')):
             if lengths is not None and (not isinstance(lengths, list) or
                     len(lengths) != len(notes) or any(
-                        not _integer(length, 0 if cell is None else 1, 64) or
+                        not _integer(length, 0 if cell is None else 1, 256 if role == 'chords' else 64) or
                         (cell is None and length != 0)
                         for cell, length in zip(notes, lengths))):
                 raise ValueError('invalid ' + field)
+        held = track.get('held_chord', [])
+        if (type(track.get('chord_hold', False)) is not bool or not isinstance(held, list) or
+                len(held) > 8 or any(not _integer(n, 0, 127) for n in held)):
+            raise ValueError('invalid held chord')
         if type(track.get('hat_beat_only', False)) is not bool or track.get('backbeat_note') not in (None, 38, 39):
             raise ValueError('invalid drum accents')
         slides = track.get('slides', [])
@@ -135,11 +139,11 @@ def validate_set_steps(data):
             type(value) is not bool for value in mutes.values()):
         raise ValueError('invalid drum mutes')
     roots = data.get('chord_roots')
-    if not isinstance(roots, list) or len(roots) > 128 or any(
+    if not isinstance(roots, list) or len(roots) > 256 or any(
             root is not None and not _integer(root, 0, 127) for root in roots):
         raise ValueError('invalid roots')
     hidden_roots = data.get('chord_roots_stash', [])
-    if not isinstance(hidden_roots, list) or len(hidden_roots) > 64 or any(
+    if not isinstance(hidden_roots, list) or len(hidden_roots) > 256 or any(
             root is not None and not _integer(root, 0, 127) for root in hidden_roots):
         raise ValueError('invalid hidden roots')
 

@@ -42,6 +42,8 @@ class Track:
         self.slides = []  # incoming lead step indices, including hidden steps
         self.hat_beat_only = False
         self.backbeat_note = None
+        self.chord_hold = False
+        self.held_chord = []
         self.direction = 'FORWARD'
         self.random_cycle = None
         self.random_order = []
@@ -152,6 +154,9 @@ class Engine:
                 self._generate_drums(16) if role == 'drum'
                 else self._generate_pattern(role))
             self.tracks[role].pattern = generated[:64]
+            if role == 'chords':
+                self.tracks[role].chord_hold = False
+                self.tracks[role].held_chord = []
             self.tracks[role].stash = []
             self.tracks[role].random_cycle = None
             if role == 'chords':
@@ -185,10 +190,10 @@ class Engine:
                 if step < len(self.tracks['bass'].lengths):
                     self.tracks['bass'].lengths[step] = 1
 
-    def _fill_hidden_tail(self, role, lead_motif=None):
+    def _fill_hidden_tail(self, role, lead_motif=None, target=64):
         """Choose all hidden steps once; resizing only reveals or hides them."""
         track = self.tracks[role]
-        missing = 64 - len(track.pattern) - len(track.stash)
+        missing = target - len(track.pattern) - len(track.stash)
         if missing <= 0:
             return
         extra, roots = self._extra_notes(role, missing, lead_motif,
@@ -382,6 +387,8 @@ class Engine:
         else:
             self.drum_style = random.choice(DRUM_STYLES)
             self.drum_density = random.choice((30, 40, 50, 60, 70, 80))
+        if role == 'chords':
+            return random.choices((16, 32, 64, 128, 256), weights=(16, 12, 8, 4, 2))[0]
         return random.choices((1, 2, 4, 8, 16, 32, 64),
                               weights=(1, 2, 5, 8, 16, 12, 6))[0]
 
@@ -674,8 +681,36 @@ class Engine:
         self._sync_lengths(role)
         old_length = len(track.pattern)
         new_length = old_length
-        for _ in range(min(abs(delta), 8)):
-            new_length = min(64, new_length * 2) if delta > 0 else max(1, new_length // 2)
+        if role == 'chords':
+            for _ in range(min(abs(delta), 9)):
+                if delta < 0 and (track.chord_hold or new_length <= 16):
+                    if not track.chord_hold:
+                        shift = track.transpose + track.octave * 12
+                        held = [clamp(note - shift, 0, 127) for note, _ in track.active]
+                        if not held:
+                            relative = max(0, self.step - self.track_origins[role] - 1)
+                            position = self._position_at(track, relative)
+                            for distance in range(len(track.pattern)):
+                                cell = track.pattern[(position - distance) % len(track.pattern)]
+                                if cell:
+                                    held = cell[:]
+                                    break
+                        self.silence(role)
+                        track.held_chord = held
+                        track.chord_hold = True
+                    break
+                if delta > 0 and track.chord_hold:
+                    self.silence(role)
+                    track.chord_hold = False
+                    track.held_chord = []
+                    new_length = 16
+                elif delta > 0:
+                    new_length = min(256, max(16, new_length * 2))
+                else:
+                    new_length = max(16, new_length // 2)
+        else:
+            for _ in range(min(abs(delta), 8)):
+                new_length = min(64, new_length * 2) if delta > 0 else max(1, new_length // 2)
         if new_length == old_length:
             return
         self.silence(role)
@@ -693,7 +728,7 @@ class Engine:
                 patterns.ARRANGER['chord_roots_16ths'] = roots[:new_length]
         else:
             needed = new_length - old_length
-            self._fill_hidden_tail(role)
+            self._fill_hidden_tail(role, target=max(64, new_length))
             kept = min(needed, len(track.stash))
             track.pattern.extend(track.stash[:kept])
             track.stash = track.stash[kept:]
@@ -771,6 +806,9 @@ class Engine:
     def randomize_notes(self, role):
         self.silence(role)
         length = len(self.tracks[role].pattern)
+        if role == 'chords':
+            self.tracks[role].chord_hold = False
+            self.tracks[role].held_chord = []
         lead_motif = self._generate_pattern('lead') if role == 'lead' else None
         if role == 'drum':
             self.tracks[role].pattern = self._generate_drums(length)
@@ -1031,6 +1069,8 @@ class Engine:
                 target.slides = current.slides[:]
                 target.hat_beat_only = current.hat_beat_only
                 target.backbeat_note = current.backbeat_note
+                target.chord_hold = current.chord_hold
+                target.held_chord = current.held_chord[:]
                 target.muted = current.muted
                 if role == 'chords':
                     roots = patterns.ARRANGER['chord_roots_16ths'][:]
@@ -1057,7 +1097,7 @@ class Engine:
                 staged._randomize_breakdown()
             elif role == 'chords':
                 bank, root_bank = [], []
-                while len(bank) < 64:
+                while len(bank) < max(64, length):
                     live_roots = patterns.ARRANGER['chord_roots_16ths']
                     try:
                         segment = staged._generate_pattern('chords')
@@ -1067,9 +1107,9 @@ class Engine:
                     bank.extend(segment)
                     root_bank.extend(segment_roots)
                     yield
-                target.pattern, target.stash = bank[:length], bank[length:64]
+                target.pattern, target.stash = bank[:length], bank[length:max(64, length)]
                 roots = root_bank[:length]
-                staged.chord_roots_stash = root_bank[length:64]
+                staged.chord_roots_stash = root_bank[length:max(64, length)]
                 target.lengths = [1 if cell is not None else 0 for cell in target.pattern]
                 target.lengths_stash = [1 if cell is not None else 0 for cell in target.stash]
                 live_roots = patterns.ARRANGER['chord_roots_16ths']
@@ -1293,6 +1333,8 @@ class Engine:
                 'slides': t.slides[:],
                 'hat_beat_only': t.hat_beat_only,
                 'backbeat_note': t.backbeat_note,
+                'chord_hold': t.chord_hold,
+                'held_chord': t.held_chord[:],
             }
             yield
         result['value'] = {
@@ -1363,6 +1405,8 @@ class Engine:
         t.slides = source.get('slides', [])[:]
         t.hat_beat_only = source.get('hat_beat_only', False)
         t.backbeat_note = source.get('backbeat_note')
+        t.chord_hold = source.get('chord_hold', False)
+        t.held_chord = source.get('held_chord', [])[:]
         t.direction = source.get('direction', 'FORWARD')
         t.random_cycle = None
         t.random_order = []
@@ -1371,8 +1415,9 @@ class Engine:
                     [tuple(item) for item in cell] if role == 'drum'
                     else cell[:] if isinstance(cell, list) else cell
                     for cell in cells]
-        t.pattern = restored_cells(source['pattern'][:64])
-        t.stash = restored_cells(source.get('stash', [])[:max(0, 64 - len(t.pattern))])
+        limit = 256 if role == 'chords' else 64
+        t.pattern = restored_cells(source['pattern'][:limit])
+        t.stash = restored_cells(source.get('stash', [])[:max(0, limit - len(t.pattern))])
         t.lengths = source.get('lengths', [1 if cell is not None else 0
                                             for cell in t.pattern])[:len(t.pattern)]
         t.lengths_stash = source.get('lengths_stash', [1 if cell is not None else 0
@@ -1501,7 +1546,7 @@ class Engine:
         if track.muted or not track.pattern:
             return []
         position = self._position_at(track, step)
-        cell = track.pattern[position]
+        cell = track.held_chord if track.role == 'chords' and track.chord_hold else track.pattern[position]
         if cell is None and track.role != 'drum' and len(track.lengths) == len(track.pattern):
             distance_limit = (step % len(track.pattern) if track.direction == 'RANDOM'
                               else len(track.pattern) * 2 - 2 if track.direction == 'PING PONG'
@@ -1532,7 +1577,7 @@ class Engine:
             if cell is None:
                 return []
             items = cell if isinstance(cell, list) else [cell]
-        if track.role == 'chords' and self.chord_style == 'HIT' and step > 0:
+        if track.role == 'chords' and not track.chord_hold and self.chord_style == 'HIT' and step > 0:
             cycle = (max(1, len(track.pattern) * 2 - 2) if track.direction == 'PING PONG'
                      else len(track.pattern))
             if step % cycle == 0:
@@ -1690,7 +1735,7 @@ class Engine:
                         0 < self.roll_due_step - self.step <= AUTO_PRE_ROLL_STEPS):
                     notes = [(note, velocity) for note, velocity in notes
                              if note not in self.auto_pre_roll_notes]
-            if notes != track.active or role == 'drum' or (role == 'chords' and self.chord_style == 'STACCATO'):
+            if notes != track.active or role == 'drum' or (role == 'chords' and not track.chord_hold and self.chord_style == 'STACCATO'):
                 slide = False
                 if role == 'lead' and hasattr(self.sink, 'slide'):
                     position = self._position_at(track, self.step - self.track_origins[role])
@@ -1724,5 +1769,5 @@ class Engine:
     def release_drums(self):
         # Half-step percussion gates give repeated hits a real low interval.
         self.silence('drum')
-        if self.chord_style == 'STACCATO':
+        if self.chord_style == 'STACCATO' and not self.tracks['chords'].chord_hold:
             self.silence('chords')

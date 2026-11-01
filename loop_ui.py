@@ -6,7 +6,7 @@ from loop_settings import CLOCK_SOURCES
 import loop_patterns as patterns
 
 # Updated by tools/release_looper.py when a release is prepared.
-LOOPER_VERSION = '0.8.6'
+LOOPER_VERSION = '0.9.0'
 
 
 _SCALE_LABELS = {'Major': 'MAJ', 'Minor': 'MIN', 'Phrygian': 'PHR',
@@ -227,8 +227,8 @@ class Menu:
                                                        track.bank, track.program)
                 return 'NORMAL'
             if row == 'LOOP LENGTH':
-                length = len(e.tracks[self.page].pattern)
-                return '%d STEPS' % length
+                track = e.tracks[self.page]
+                return 'HOLD' if self.page == 'chords' and track.chord_hold else '%d STEPS' % len(track.pattern)
             if row == 'DIRECTION':
                 return self.direction_candidate if self.editing else e.tracks[self.page].direction
             if row == 'OCTAVE':
